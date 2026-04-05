@@ -1,0 +1,277 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the application (Doctor, Assistant, Admin).",
+      "type": "object",
+      "properties": {
+        "nom": { "type": "string" },
+        "prenom": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["medecin", "assistante", "admin"] },
+        "actif": { "type": "boolean" },
+        "date_creation": { "type": "string", "format": "date-time" }
+      },
+      "required": ["nom", "prenom", "email", "role", "actif", "date_creation"]
+    },
+    "Patient": {
+      "title": "Patient",
+      "description": "A patient record.",
+      "type": "object",
+      "properties": {
+        "code_patient": { "type": "string" },
+        "nom": { "type": "string" },
+        "prenom": { "type": "string" },
+        "cin": { "type": "string" },
+        "date_naissance": { "type": "string" },
+        "sexe": { "type": "string", "enum": ["M", "F"] },
+        "telephone": { "type": "string" },
+        "email": { "type": "string" },
+        "adresse": { "type": "string" },
+        "ville": { "type": "string" },
+        "profession": { "type": "string" },
+        "contact_urgence": { "type": "string" },
+        "cnss": { "type": "string" },
+        "amo": { "type": "string" },
+        "mutuelle": { "type": "string" },
+        "assurance": { "type": "string" },
+        "antecedents_medicaux": { "type": "string" },
+        "antecedents_chirurgicaux": { "type": "string" },
+        "allergies": { "type": "string" },
+        "traitements_chroniques": { "type": "string" },
+        "habitudes": { "type": "string" },
+        "notes_medicales": { "type": "string" },
+        "statut_suivi": { "type": "string", "enum": ["nouveau patient", "en diagnostic", "sous traitement", "suivi", "contrôle", "dossier clôturé"] },
+        "created_by": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["nom", "prenom", "telephone", "created_by", "created_at", "updated_at"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "A scheduled appointment.",
+      "type": "object",
+      "properties": {
+        "patient_id": { "type": "string" },
+        "date_rdv": { "type": "string" },
+        "heure_rdv": { "type": "string" },
+        "motif": { "type": "string" },
+        "statut": { "type": "string", "enum": ["prévu", "confirmé", "annulé", "réalisé", "absent"] },
+        "notes": { "type": "string" },
+        "created_by": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["patient_id", "date_rdv", "heure_rdv", "statut", "created_by", "created_at", "updated_at"]
+    },
+    "Consultation": {
+      "title": "Consultation",
+      "description": "A medical consultation record.",
+      "type": "object",
+      "properties": {
+        "patient_id": { "type": "string" },
+        "appointment_id": { "type": "string" },
+        "date_consultation": { "type": "string", "format": "date-time" },
+        "motif": { "type": "string" },
+        "symptomes": { "type": "string" },
+        "examen_clinique": { "type": "string" },
+        "hypotheses_diagnostiques": { "type": "string" },
+        "diagnostic_principal": { "type": "string" },
+        "conduite_a_tenir": { "type": "string" },
+        "conseils": { "type": "string" },
+        "prochain_controle": { "type": "string" },
+        "date_prochain_rdv": { "type": "string" },
+        "notes": { "type": "string" },
+        "created_by": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["patient_id", "date_consultation", "created_by", "created_at", "updated_at"]
+    },
+    "Prescription": {
+      "title": "Prescription",
+      "description": "A medical prescription header.",
+      "type": "object",
+      "properties": {
+        "consultation_id": { "type": "string" },
+        "patient_id": { "type": "string" },
+        "date_prescription": { "type": "string", "format": "date-time" },
+        "instructions_generales": { "type": "string" },
+        "created_by": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["consultation_id", "patient_id", "date_prescription", "created_by", "created_at"]
+    },
+    "PrescriptionLine": {
+      "title": "PrescriptionLine",
+      "description": "A line item in a prescription.",
+      "type": "object",
+      "properties": {
+        "prescription_id": { "type": "string" },
+        "medicament_id": { "type": "string" },
+        "nom_libre": { "type": "string" },
+        "dosage": { "type": "string" },
+        "posologie": { "type": "string" },
+        "duree": { "type": "string" },
+        "instructions": { "type": "string" },
+        "ordre_affichage": { "type": "number" }
+      },
+      "required": ["prescription_id", "posologie", "ordre_affichage"]
+    },
+    "Medicament": {
+      "title": "Medicament",
+      "description": "A medication in the database.",
+      "type": "object",
+      "properties": {
+        "nomMedicament": { "type": "string" },
+        "dci": { "type": "string" },
+        "dosage": { "type": "string" },
+        "uniteDosage": { "type": "string" },
+        "forme": { "type": "string" },
+        "presentation": { "type": "string" },
+        "ppv": { "type": "number" },
+        "ph": { "type": "number" },
+        "prixBr": { "type": "number" },
+        "princepsGenerique": { "type": "string" },
+        "tauxRemboursement": { "type": "number" },
+        "sourceImport": { "type": "string" },
+        "nomFichierImport": { "type": "string" },
+        "dateImport": { "type": "string", "format": "date-time" },
+        "searchKeywords": { "type": "array", "items": { "type": "string" } },
+        "actif": { "type": "boolean" }
+      },
+      "required": ["nomMedicament", "actif"]
+    },
+    "Exam": {
+      "title": "Exam",
+      "description": "A medical exam request or result.",
+      "type": "object",
+      "properties": {
+        "patient_id": { "type": "string" },
+        "consultation_id": { "type": "string" },
+        "type_examen": { "type": "string" },
+        "date_demande": { "type": "string", "format": "date-time" },
+        "date_realisation": { "type": "string", "format": "date-time" },
+        "statut": { "type": "string", "enum": ["demandé", "réalisé", "annulé"] },
+        "resultat_resume": { "type": "string" },
+        "document_id": { "type": "string" },
+        "notes": { "type": "string" },
+        "created_by": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["patient_id", "type_examen", "date_demande", "statut", "created_by", "created_at"]
+    },
+    "Document": {
+      "title": "Document",
+      "description": "A document associated with a patient.",
+      "type": "object",
+      "properties": {
+        "patient_id": { "type": "string" },
+        "consultation_id": { "type": "string" },
+        "exam_id": { "type": "string" },
+        "type_document": { "type": "string" },
+        "nom_fichier": { "type": "string" },
+        "url_fichier": { "type": "string" },
+        "format_fichier": { "type": "string" },
+        "taille": { "type": "number" },
+        "description": { "type": "string" },
+        "uploaded_by": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["patient_id", "nom_fichier", "url_fichier", "uploaded_by", "created_at"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "A payment record.",
+      "type": "object",
+      "properties": {
+        "patient_id": { "type": "string" },
+        "consultation_id": { "type": "string" },
+        "montant": { "type": "number" },
+        "mode_paiement": { "type": "string", "enum": ["espèces", "carte", "assurance", "mutuelle", "chèque", "virement"] },
+        "statut_paiement": { "type": "string", "enum": ["payé", "non payé", "partiel"] },
+        "date_paiement": { "type": "string", "format": "date-time" },
+        "reference": { "type": "string" },
+        "notes": { "type": "string" },
+        "created_by": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["patient_id", "montant", "mode_paiement", "statut_paiement", "date_paiement", "created_by", "created_at"]
+    },
+    "Tag": {
+      "title": "Tag",
+      "description": "A tag for patients.",
+      "type": "object",
+      "properties": {
+        "nom": { "type": "string" },
+        "categorie": { "type": "string" },
+        "couleur": { "type": "string" },
+        "actif": { "type": "boolean" }
+      },
+      "required": ["nom", "couleur", "actif"]
+    },
+    "PatientTag": {
+      "title": "PatientTag",
+      "description": "A tag assigned to a patient.",
+      "type": "object",
+      "properties": {
+        "patient_id": { "type": "string" },
+        "tag_id": { "type": "string" },
+        "date_attribution": { "type": "string", "format": "date-time" },
+        "attribue_par": { "type": "string" }
+      },
+      "required": ["patient_id", "tag_id", "date_attribution", "attribue_par"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Store user accounts (medecin, assistante, admin)."
+    },
+    "patients": {
+      "schema": { "$ref": "#/entities/Patient" },
+      "description": "Store patient records."
+    },
+    "appointments": {
+      "schema": { "$ref": "#/entities/Appointment" },
+      "description": "Store scheduled appointments."
+    },
+    "consultations": {
+      "schema": { "$ref": "#/entities/Consultation" },
+      "description": "Store medical consultations."
+    },
+    "prescriptions": {
+      "schema": { "$ref": "#/entities/Prescription" },
+      "description": "Store prescription headers."
+    },
+    "prescription_lines": {
+      "schema": { "$ref": "#/entities/PrescriptionLine" },
+      "description": "Store prescription line items."
+    },
+    "medicaments": {
+      "schema": { "$ref": "#/entities/Medicament" },
+      "description": "Store medication database."
+    },
+    "exams": {
+      "schema": { "$ref": "#/entities/Exam" },
+      "description": "Store medical exams."
+    },
+    "documents": {
+      "schema": { "$ref": "#/entities/Document" },
+      "description": "Store patient documents."
+    },
+    "payments": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "Store payment records."
+    },
+    "tags": {
+      "schema": { "$ref": "#/entities/Tag" },
+      "description": "Store available tags."
+    },
+    "patient_tags": {
+      "schema": { "$ref": "#/entities/PatientTag" },
+      "description": "Store tags assigned to patients."
+    }
+  }
+}

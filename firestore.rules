@@ -1,0 +1,172 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Admin via custom claim Firebase Auth (plus d'email hardcodé)
+    // Pour définir le claim : firebase-admin SDK → auth.setCustomUserClaims(uid, { role: 'admin' })
+    function hasCustomClaim(role) {
+      return request.auth.token.get('role', '') == role;
+    }
+
+    function getUserRole() {
+      // Priorité : custom claim > document Firestore
+      let claimRole = request.auth.token.get('role', '');
+      if (claimRole != '') return claimRole;
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) ?
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role : null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (hasCustomClaim('admin') || getUserRole() == 'admin');
+    }
+
+    function isMedecin() {
+      return isAuthenticated() && getUserRole() == 'medecin';
+    }
+
+    function isAssistante() {
+      return isAuthenticated() && getUserRole() == 'assistante';
+    }
+
+    function hasAccess() {
+      return isAuthenticated() && (isAdmin() || isMedecin() || isAssistante());
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isEmailOwner() {
+      return isAuthenticated() && 'email' in request.auth.token && request.auth.token.email.lower() == resource.data.email.lower();
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (isOwner(userId) && (request.resource.data.role != 'admin' || isDefaultAdmin()) || isAdmin()) && request.resource.data.keys().hasAll(['nom', 'prenom', 'email', 'role', 'actif', 'date_creation']);
+      allow update: if isAuthenticated() && (
+        (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.get('actif', true) == resource.data.get('actif', true) && request.resource.data.email == resource.data.email) || 
+        (isEmailOwner() && request.resource.data.role == resource.data.role && request.resource.data.get('actif', true) == resource.data.get('actif', true) && request.resource.data.email == resource.data.email) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /patients/{patientId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess() && request.resource.data.keys().hasAll(['nom', 'prenom', 'telephone', 'created_by', 'created_at', 'updated_at']) && (
+        !isAssistante() ||
+        request.resource.data.keys().hasOnly([
+          'nom', 'prenom', 'date_naissance', 'sexe', 'cin', 'telephone', 'adresse', 
+          'profession', 'statut_familial', 'num_dossier', 'mutuelle', 'amo', 
+          'num_cnss', 'origine_patient', 'detail_origine', 'allergies', 'poids', 
+          'created_by', 'created_at', 'updated_at'
+        ])
+      );
+      allow update: if hasAccess() && (
+        !isAssistante() || 
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'nom', 'prenom', 'date_naissance', 'sexe', 'cin', 'telephone', 'adresse', 
+            'profession', 'statut_familial', 'num_dossier', 'mutuelle', 'amo', 
+            'num_cnss', 'origine_patient', 'detail_origine', 'allergies', 'poids', 
+            'updated_at'
+          ])
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess() && request.resource.data.keys().hasAll(['patient_id', 'date_rdv', 'heure_rdv', 'statut', 'created_by', 'created_at', 'updated_at']);
+      allow update: if hasAccess();
+      allow delete: if hasAccess();
+    }
+
+    match /consultations/{consultationId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess() && request.resource.data.keys().hasAll(['patient_id', 'date_consultation', 'created_by', 'created_at', 'updated_at']) && (
+        !isAssistante() ||
+        request.resource.data.keys().hasOnly(['patient_id', 'date_consultation', 'created_by', 'created_at', 'updated_at', 'poids', 'commentaire_assistante'])
+      );
+      allow update: if hasAccess() && (
+        !isAssistante() ||
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'patient_id', 'date_consultation', 'poids', 'commentaire_assistante', 'updated_at'
+          ])
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /prescriptions/{prescriptionId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess() && !isAssistante() && request.resource.data.keys().hasAll(['consultation_id', 'patient_id', 'date_prescription', 'created_by', 'created_at']);
+      allow update: if hasAccess() && !isAssistante();
+      allow delete: if isAdmin();
+    }
+
+    match /prescription_lines/{lineId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess() && !isAssistante() && request.resource.data.keys().hasAll(['prescription_id', 'posologie', 'ordre_affichage']);
+      allow update: if hasAccess() && !isAssistante();
+      allow delete: if hasAccess() && !isAssistante();
+    }
+
+    match /medicaments/{medicamentId} {
+      allow read: if hasAccess();
+      allow create: if isAdmin() || isMedecin();
+      allow update: if isAdmin() || isMedecin();
+      allow delete: if isAdmin();
+    }
+
+    match /exams/{examId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess() && !isAssistante() && request.resource.data.keys().hasAll(['patient_id', 'type_examen', 'date_demande', 'statut', 'created_by', 'created_at']);
+      allow update: if hasAccess() && !isAssistante();
+      allow delete: if isAdmin();
+    }
+
+    match /documents/{documentId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess() && request.resource.data.keys().hasAll(['patient_id', 'nom_fichier', 'url_fichier', 'uploaded_by', 'created_at']);
+      allow update: if hasAccess();
+      allow delete: if isAdmin();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess() && request.resource.data.keys().hasAll(['patient_id', 'montant', 'mode_paiement', 'statut_paiement', 'date_paiement', 'created_by', 'created_at']);
+      allow update: if hasAccess();
+      allow delete: if isAdmin();
+    }
+
+    match /tags/{tagId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess() && request.resource.data.keys().hasAll(['nom', 'couleur', 'actif']);
+      allow update: if hasAccess();
+      allow delete: if isAdmin();
+    }
+
+    match /patient_tags/{patientTagId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess() && request.resource.data.keys().hasAll(['patient_id', 'tag_id', 'date_attribution', 'attribue_par']);
+      allow update: if hasAccess();
+      allow delete: if hasAccess();
+    }
+  }
+}
