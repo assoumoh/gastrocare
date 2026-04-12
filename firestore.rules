@@ -203,3 +203,31 @@ service cloud.firestore {
     }
   }
 }
+
+    // ===============================================================
+    // Settings Cabinet — Admin et Médecin
+    // ===============================================================
+    match /settings/cabinet {
+      allow read: if hasAccess();
+      allow write: if isAdmin() || isMedecin();
+    }
+
+    // ===============================================================
+    // File d'attente
+    // ===============================================================
+    match /file_attente/{entryId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess();
+      allow update: if hasAccess();
+      allow delete: if isAdmin() || isMedecin();
+    }
+
+    // ===============================================================
+    // Relances
+    // ===============================================================
+    match /relances/{relanceId} {
+      allow read: if hasAccess();
+      allow create: if hasAccess();
+      allow update: if hasAccess();
+      allow delete: if isAdmin();
+    }
