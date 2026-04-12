@@ -21,6 +21,7 @@ import Payments from './pages/Payments';
 import Admin from './pages/Admin';
 import VeoVideo from './pages/VeoVideo';
 import Prescriptions from './pages/Prescriptions';
+import SettingsCabinet from './pages/SettingsCabinet';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { currentUser, appUser, loading } = useAuth();
@@ -32,12 +33,11 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 const RoleGuard = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles: string[] }) => {
   const { appUser, loading } = useAuth();
   if (loading) return <div className="flex h-screen items-center justify-center">Chargement...</div>;
-  
+
   if (appUser && allowedRoles.includes(appUser.role)) {
     return <>{children}</>;
   }
-  
-  // If not authorized, redirect to dashboard (or login if not logged in)
+
   return <Navigate to="/" />;
 };
 
@@ -61,6 +61,7 @@ export default function App() {
             <Route path="documents" element={<Documents />} />
             <Route path="payments" element={<Payments />} />
             <Route path="admin" element={<RoleGuard allowedRoles={['admin']}><Admin /></RoleGuard>} />
+            <Route path="settings" element={<RoleGuard allowedRoles={['admin', 'medecin']}><SettingsCabinet /></RoleGuard>} />
             <Route path="veo" element={<RoleGuard allowedRoles={['admin', 'medecin']}><VeoVideo /></RoleGuard>} />
           </Route>
         </Routes>

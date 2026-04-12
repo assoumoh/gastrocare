@@ -1,0 +1,33 @@
+import type { SettingsCabinet } from '../types';
+
+export const DEFAULT_CABINET_SETTINGS: SettingsCabinet = {
+    specialite: 'Gastroentérologie',
+    nom_cabinet: '',
+    adresse_cabinet: '',
+    telephone_cabinet: '',
+    duree_consultation: 20,
+    duree_pre_consultation: 5,
+    duree_creneau_rdv: 20,
+    tarif_consultation: 400,
+    delai_relance_defaut: 30,
+    message_rappel_rdv: 'Bonjour {patient_prenom}, nous vous rappelons votre rendez-vous le {date_rdv} à {heure_rdv}. Cabinet de Gastroentérologie.',
+    modes_paiement: ['especes', 'carte', 'cheque', 'virement'],
+    champs_pre_consultation: [
+        { id: 'poids', label: 'Poids (kg)', type: 'number', unite: 'kg', actif: true, ordre: 1 },
+        { id: 'tension_systolique', label: 'Tension systolique', type: 'number', unite: 'mmHg', actif: true, ordre: 2 },
+        { id: 'tension_diastolique', label: 'Tension diastolique', type: 'number', unite: 'mmHg', actif: true, ordre: 3 },
+        { id: 'glycemie', label: 'Glycémie', type: 'number', unite: 'g/L', actif: true, ordre: 4 },
+        { id: 'temperature', label: 'Température', type: 'number', unite: '°C', actif: true, ordre: 5 },
+        { id: 'saturation_o2', label: 'Saturation O₂', type: 'number', unite: '%', actif: false, ordre: 6 },
+        { id: 'frequence_cardiaque', label: 'Fréquence cardiaque', type: 'number', unite: 'bpm', actif: false, ordre: 7 },
+    ],
+    creneaux_horaires: {
+        lundi: { actif: true, debut: '09:00', fin: '18:00', pause_debut: '12:00', pause_fin: '14:00' },
+        mardi: { actif: true, debut: '09:00', fin: '18:00', pause_debut: '12:00', pause_fin: '14:00' },
+        mercredi: { actif: true, debut: '09:00', fin: '18:00', pause_debut: '12:00', pause_fin: '14:00' },
+        jeudi: { actif: true, debut: '09:00', fin: '18:00', pause_debut: '12:00', pause_fin: '14:00' },
+        vendredi: { actif: true, debut: '09:00', fin: '18:00', pause_debut: '12:00', pause_fin: '14:00' },
+        samedi: { actif: true, debut: '09:00', fin: '13:00' },
+        dimanche: { actif: false, debut: '09:00', fin: '13:00' },
+    },
+};

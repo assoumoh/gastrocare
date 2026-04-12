@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -30,23 +30,24 @@ const navigation = [
   { name: 'Médicaments', href: '/medicaments', icon: Pill, roles: ['admin', 'medecin'] },
   { name: 'Paiements', href: '/payments', icon: CreditCard, roles: ['admin', 'medecin', 'assistante'] },
   { name: 'Animation IA', href: '/veo', icon: Video, roles: ['admin', 'medecin'] },
+  { name: 'Paramètres', href: '/settings', icon: Settings, roles: ['admin', 'medecin'] },
 ];
 
 export default function Layout() {
   const { appUser, logout } = useAuth();
   const navigate = useNavigate();
-  const [globalSearch, setGlobalSearch] = useState('');
 
   const handleLogout = async () => {
     await logout();
     navigate('/login');
   };
 
-  const handleGlobalSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (globalSearch.trim()) {
-      navigate(`/patients?q=${encodeURIComponent(globalSearch.trim())}`);
-      setGlobalSearch('');
+  const handleGlobalSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      const value = (e.target as HTMLInputElement).value.trim();
+      if (value) {
+        navigate(`/patients?q=${encodeURIComponent(value)}`);
+      }
     }
   };
 
@@ -69,6 +70,7 @@ export default function Layout() {
               <NavLink
                 key={item.name}
                 to={item.href}
+                end={item.href === '/'}
                 className={({ isActive }) =>
                   clsx(
                     isActive
@@ -78,7 +80,10 @@ export default function Layout() {
                   )
                 }
               >
-                <item.icon className="mr-3 flex-shrink-0 h-5 w-5" aria-hidden="true" />
+                <item.icon
+                  className="mr-3 flex-shrink-0 h-5 w-5"
+                  aria-hidden="true"
+                />
                 {item.name}
               </NavLink>
             ))}
@@ -126,20 +131,19 @@ export default function Layout() {
       <div className="flex-1 flex flex-col overflow-hidden relative">
         {/* Header */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8">
-          <form onSubmit={handleGlobalSearch} className="flex-1 flex">
+          <div className="flex-1 flex">
             <div className="w-full max-w-md relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-5 w-5 text-slate-400" />
               </div>
               <input
                 type="text"
-                placeholder="Rechercher un patient..."
-                value={globalSearch}
-                onChange={(e) => setGlobalSearch(e.target.value)}
+                placeholder="Rechercher un patient, médicament..."
+                onKeyDown={handleGlobalSearch}
                 className="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-lg leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-colors"
               />
             </div>
-          </form>
+          </div>
           <div className="ml-4 flex items-center md:ml-6">
             <button className="p-2 rounded-full text-slate-400 hover:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500">
               <span className="sr-only">Voir les notifications</span>
