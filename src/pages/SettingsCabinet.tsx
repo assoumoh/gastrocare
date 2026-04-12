@@ -30,6 +30,81 @@ const MODES_PAIEMENT_OPTIONS = [
     { value: 'mutuelle', label: 'Mutuelle directe' },
 ];
 
+// Liste exhaustive des spécialités médicales (France + Maroc + Généraliste)
+const SPECIALITES_MEDICALES = [
+    // --- Médecine générale ---
+    'Médecine générale',
+    // --- Spécialités médicales ---
+    'Allergologie',
+    'Anatomie et cytologie pathologiques',
+    'Anesthésie-réanimation',
+    'Angiologie - Médecine vasculaire',
+    'Cardiologie',
+    'Dermatologie et vénérologie',
+    'Endocrinologie - Diabétologie - Nutrition',
+    'Gastro-entérologie et hépatologie',
+    'Génétique médicale',
+    'Gériatrie - Gérontologie',
+    'Gynécologie médicale',
+    'Gynécologie-obstétrique',
+    'Hématologie',
+    'Hépatologie',
+    'Immunologie clinique',
+    'Infectiologie - Maladies infectieuses',
+    'Médecine du sport',
+    'Médecine du travail',
+    'Médecine d\'urgence',
+    'Médecine interne',
+    'Médecine légale',
+    'Médecine nucléaire',
+    'Médecine physique et de réadaptation',
+    'Néphrologie',
+    'Neurologie',
+    'Nutrition',
+    'Oncologie médicale',
+    'Oncologie radiothérapie',
+    'Ophtalmologie',
+    'Oto-rhino-laryngologie (ORL)',
+    'Pédiatrie',
+    'Pharmacologie clinique',
+    'Pneumologie',
+    'Psychiatrie',
+    'Pédopsychiatrie',
+    'Radiologie et imagerie médicale',
+    'Rhumatologie',
+    'Santé publique et médecine sociale',
+    // --- Spécialités chirurgicales ---
+    'Chirurgie cardiaque',
+    'Chirurgie digestive - viscérale',
+    'Chirurgie générale',
+    'Chirurgie infantile - pédiatrique',
+    'Chirurgie maxillo-faciale',
+    'Chirurgie orthopédique et traumatologique',
+    'Chirurgie plastique, reconstructrice et esthétique',
+    'Chirurgie thoracique',
+    'Chirurgie urologique',
+    'Chirurgie vasculaire',
+    'Neurochirurgie',
+    // --- Spécialités dentaires ---
+    'Chirurgie dentaire',
+    'Orthodontie',
+    'Parodontologie',
+    // --- Biologie / Pharmacie ---
+    'Biologie médicale',
+    'Pharmacie',
+    // --- Médecines complémentaires (reconnues au Maroc / France) ---
+    'Médecine esthétique',
+    'Médecine de la douleur - Algologie',
+    'Médecine palliative',
+    'Addictologie',
+    'Sexologie',
+    'Médecine tropicale',
+    'Néonatologie',
+    'Réanimation médicale',
+    // --- Autre ---
+    'Autre spécialité',
+];
+
 export default function SettingsCabinet() {
     const { appUser } = useAuth();
     const { settings, loading } = useSettings();
@@ -37,6 +112,8 @@ export default function SettingsCabinet() {
     const [formData, setFormData] = useState<SettingsCabinet>(DEFAULT_CABINET_SETTINGS);
     const [saving, setSaving] = useState(false);
     const [saveMessage, setSaveMessage] = useState('');
+    const [specialiteSearch, setSpecialiteSearch] = useState('');
+    const [showSpecialiteDropdown, setShowSpecialiteDropdown] = useState(false);
 
     useEffect(() => {
         if (!loading) {
@@ -119,6 +196,17 @@ export default function SettingsCabinet() {
         });
     };
 
+    // Filtrage des spécialités pour la recherche
+    const filteredSpecialites = SPECIALITES_MEDICALES.filter((s) =>
+        s.toLowerCase().includes(specialiteSearch.toLowerCase())
+    );
+
+    const handleSelectSpecialite = (specialite: string) => {
+        updateField('specialite', specialite);
+        setSpecialiteSearch('');
+        setShowSpecialiteDropdown(false);
+    };
+
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -156,8 +244,8 @@ export default function SettingsCabinet() {
                             key={tab.key}
                             onClick={() => setActiveTab(tab.key)}
                             className={`flex items-center whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium transition-colors ${activeTab === tab.key
-                                ? 'border-indigo-500 text-indigo-600'
-                                : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
+                                    ? 'border-indigo-500 text-indigo-600'
+                                    : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
                                 }`}
                         >
                             <tab.icon className="mr-2 h-4 w-4" />
@@ -178,10 +266,68 @@ export default function SettingsCabinet() {
                                 <label className="block text-sm font-medium text-slate-700">Nom du cabinet</label>
                                 <input type="text" value={formData.nom_cabinet || ''} onChange={(e) => updateField('nom_cabinet', e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" />
                             </div>
-                            <div>
+
+                            {/* ===== DROPDOWN SPÉCIALITÉ AVEC RECHERCHE ===== */}
+                            <div className="relative">
                                 <label className="block text-sm font-medium text-slate-700">Spécialité</label>
-                                <input type="text" value={formData.specialite} onChange={(e) => updateField('specialite', e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                <div className="mt-1 relative">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowSpecialiteDropdown(!showSpecialiteDropdown)}
+                                        className="relative w-full cursor-pointer rounded-md border border-slate-300 bg-white py-2 pl-3 pr-10 text-left text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    >
+                                        <span className={formData.specialite ? 'text-slate-900' : 'text-slate-400'}>
+                                            {formData.specialite || 'Sélectionner une spécialité...'}
+                                        </span>
+                                        <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                                            <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </span>
+                                    </button>
+
+                                    {showSpecialiteDropdown && (
+                                        <div className="absolute z-50 mt-1 w-full rounded-md bg-white shadow-lg border border-slate-200">
+                                            {/* Champ de recherche */}
+                                            <div className="p-2 border-b border-slate-100">
+                                                <input
+                                                    type="text"
+                                                    value={specialiteSearch}
+                                                    onChange={(e) => setSpecialiteSearch(e.target.value)}
+                                                    placeholder="Rechercher une spécialité..."
+                                                    autoFocus
+                                                    className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                />
+                                            </div>
+                                            {/* Liste déroulante */}
+                                            <ul className="max-h-60 overflow-auto py-1">
+                                                {filteredSpecialites.length === 0 ? (
+                                                    <li className="px-3 py-2 text-sm text-slate-500 italic">Aucune spécialité trouvée</li>
+                                                ) : (
+                                                    filteredSpecialites.map((specialite) => (
+                                                        <li
+                                                            key={specialite}
+                                                            onClick={() => handleSelectSpecialite(specialite)}
+                                                            className={`cursor-pointer px-3 py-2 text-sm hover:bg-indigo-50 hover:text-indigo-700 ${formData.specialite === specialite ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-700'
+                                                                }`}
+                                                        >
+                                                            {specialite}
+                                                        </li>
+                                                    ))
+                                                )}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                                {/* Fermer le dropdown si on clique ailleurs */}
+                                {showSpecialiteDropdown && (
+                                    <div
+                                        className="fixed inset-0 z-40"
+                                        onClick={() => { setShowSpecialiteDropdown(false); setSpecialiteSearch(''); }}
+                                    />
+                                )}
                             </div>
+
                             <div>
                                 <label className="block text-sm font-medium text-slate-700">Adresse</label>
                                 <input type="text" value={formData.adresse_cabinet || ''} onChange={(e) => updateField('adresse_cabinet', e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" />
