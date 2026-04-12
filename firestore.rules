@@ -11,18 +11,15 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Admin via custom claim Firebase Auth (plus d'email hardcodé)
-    // Pour définir le claim : firebase-admin SDK → auth.setCustomUserClaims(uid, { role: 'admin' })
     function hasCustomClaim(role) {
       return request.auth.token.get('role', '') == role;
     }
 
     function getUserRole() {
-      // Priorité : custom claim > document Firestore
       let claimRole = request.auth.token.get('role', '');
-      if (claimRole != '') return claimRole;
-      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) ?
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role : null;
+      return claimRole != '' ? claimRole :
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) ?
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role : '');
     }
 
     function isAdmin() {
@@ -45,25 +42,37 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isEmailOwner() {
-      return isAuthenticated() && 'email' in request.auth.token && request.auth.token.email.lower() == resource.data.email.lower();
+    // ===============================================================
+    // Settings — Admin uniquement
+    // ===============================================================
+    match /settings/{settingId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
     }
 
     // ===============================================================
-    // Rules
+    // Users
     // ===============================================================
-
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && (isOwner(userId) && (request.resource.data.role != 'admin' || isDefaultAdmin()) || isAdmin()) && request.resource.data.keys().hasAll(['nom', 'prenom', 'email', 'role', 'actif', 'date_creation']);
+      allow create: if isAuthenticated() && (
+        (isOwner(userId) && request.resource.data.role != 'admin') || 
+        isAdmin()
+      ) && request.resource.data.keys().hasAll(['nom', 'prenom', 'email', 'role', 'actif', 'date_creation']);
       allow update: if isAuthenticated() && (
-        (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.get('actif', true) == resource.data.get('actif', true) && request.resource.data.email == resource.data.email) || 
-        (isEmailOwner() && request.resource.data.role == resource.data.role && request.resource.data.get('actif', true) == resource.data.get('actif', true) && request.resource.data.email == resource.data.email) ||
+        (isOwner(userId) 
+          && request.resource.data.role == resource.data.role 
+          && request.resource.data.get('actif', true) == resource.data.get('actif', true) 
+          && request.resource.data.email == resource.data.email
+        ) || 
         isAdmin()
       );
       allow delete: if isAdmin();
     }
 
+    // ===============================================================
+    // Patients
+    // ===============================================================
     match /patients/{patientId} {
       allow read: if hasAccess();
       allow create: if hasAccess() && request.resource.data.keys().hasAll(['nom', 'prenom', 'telephone', 'created_by', 'created_at', 'updated_at']) && (
@@ -89,6 +98,9 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ===============================================================
+    // Appointments
+    // ===============================================================
     match /appointments/{appointmentId} {
       allow read: if hasAccess();
       allow create: if hasAccess() && request.resource.data.keys().hasAll(['patient_id', 'date_rdv', 'heure_rdv', 'statut', 'created_by', 'created_at', 'updated_at']);
@@ -96,6 +108,9 @@ service cloud.firestore {
       allow delete: if hasAccess();
     }
 
+    // ===============================================================
+    // Consultations
+    // ===============================================================
     match /consultations/{consultationId} {
       allow read: if hasAccess();
       allow create: if hasAccess() && request.resource.data.keys().hasAll(['patient_id', 'date_consultation', 'created_by', 'created_at', 'updated_at']) && (
@@ -113,6 +128,9 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ===============================================================
+    // Prescriptions
+    // ===============================================================
     match /prescriptions/{prescriptionId} {
       allow read: if hasAccess();
       allow create: if hasAccess() && !isAssistante() && request.resource.data.keys().hasAll(['consultation_id', 'patient_id', 'date_prescription', 'created_by', 'created_at']);
@@ -127,6 +145,9 @@ service cloud.firestore {
       allow delete: if hasAccess() && !isAssistante();
     }
 
+    // ===============================================================
+    // Médicaments
+    // ===============================================================
     match /medicaments/{medicamentId} {
       allow read: if hasAccess();
       allow create: if isAdmin() || isMedecin();
@@ -134,6 +155,9 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ===============================================================
+    // Examens
+    // ===============================================================
     match /exams/{examId} {
       allow read: if hasAccess();
       allow create: if hasAccess() && !isAssistante() && request.resource.data.keys().hasAll(['patient_id', 'type_examen', 'date_demande', 'statut', 'created_by', 'created_at']);
@@ -141,6 +165,9 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ===============================================================
+    // Documents
+    // ===============================================================
     match /documents/{documentId} {
       allow read: if hasAccess();
       allow create: if hasAccess() && request.resource.data.keys().hasAll(['patient_id', 'nom_fichier', 'url_fichier', 'uploaded_by', 'created_at']);
@@ -148,6 +175,9 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ===============================================================
+    // Paiements
+    // ===============================================================
     match /payments/{paymentId} {
       allow read: if hasAccess();
       allow create: if hasAccess() && request.resource.data.keys().hasAll(['patient_id', 'montant', 'mode_paiement', 'statut_paiement', 'date_paiement', 'created_by', 'created_at']);
@@ -155,6 +185,9 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ===============================================================
+    // Tags
+    // ===============================================================
     match /tags/{tagId} {
       allow read: if hasAccess();
       allow create: if hasAccess() && request.resource.data.keys().hasAll(['nom', 'couleur', 'actif']);
