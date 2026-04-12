@@ -1,14 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { 
-  LayoutDashboard, 
-  Users, 
-  Calendar, 
-  Stethoscope, 
-  FileText, 
-  Pill, 
-  CreditCard, 
+import {
+  LayoutDashboard,
+  Users,
+  Calendar,
+  Stethoscope,
+  FileText,
+  Pill,
+  CreditCard,
   Settings,
   LogOut,
   Search,
@@ -35,13 +35,22 @@ const navigation = [
 export default function Layout() {
   const { appUser, logout } = useAuth();
   const navigate = useNavigate();
+  const [globalSearch, setGlobalSearch] = useState('');
 
   const handleLogout = async () => {
     await logout();
     navigate('/login');
   };
 
-  const filteredNavigation = navigation.filter(item => 
+  const handleGlobalSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (globalSearch.trim()) {
+      navigate(`/patients?q=${encodeURIComponent(globalSearch.trim())}`);
+      setGlobalSearch('');
+    }
+  };
+
+  const filteredNavigation = navigation.filter(item =>
     appUser && item.roles.includes(appUser.role)
   );
 
@@ -53,7 +62,7 @@ export default function Layout() {
           <Stethoscope className="h-8 w-8 text-indigo-600 mr-2" />
           <span className="text-xl font-bold text-slate-900">GastroCare Pro</span>
         </div>
-        
+
         <div className="flex-1 overflow-y-auto py-4">
           <nav className="space-y-1 px-3">
             {filteredNavigation.map((item) => (
@@ -69,14 +78,11 @@ export default function Layout() {
                   )
                 }
               >
-                <item.icon
-                  className="mr-3 flex-shrink-0 h-5 w-5"
-                  aria-hidden="true"
-                />
+                <item.icon className="mr-3 flex-shrink-0 h-5 w-5" aria-hidden="true" />
                 {item.name}
               </NavLink>
             ))}
-            
+
             {appUser?.role === 'admin' && (
               <NavLink
                 to="/admin"
@@ -120,18 +126,20 @@ export default function Layout() {
       <div className="flex-1 flex flex-col overflow-hidden relative">
         {/* Header */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8">
-          <div className="flex-1 flex">
+          <form onSubmit={handleGlobalSearch} className="flex-1 flex">
             <div className="w-full max-w-md relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-5 w-5 text-slate-400" />
               </div>
               <input
                 type="text"
-                placeholder="Rechercher un patient, médicament..."
+                placeholder="Rechercher un patient..."
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
                 className="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-lg leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-colors"
               />
             </div>
-          </div>
+          </form>
           <div className="ml-4 flex items-center md:ml-6">
             <button className="p-2 rounded-full text-slate-400 hover:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500">
               <span className="sr-only">Voir les notifications</span>
@@ -144,7 +152,7 @@ export default function Layout() {
         <main className="flex-1 overflow-y-auto bg-slate-50 p-8">
           <Outlet />
         </main>
-        
+
         <Chatbot />
       </div>
     </div>
