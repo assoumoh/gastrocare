@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { X, Printer } from 'lucide-react';
 
 interface PrescriptionPrintViewProps {
@@ -9,7 +9,7 @@ interface PrescriptionPrintViewProps {
 }
 
 export default function PrescriptionPrintView({ prescription, patient, medicaments, onClose }: PrescriptionPrintViewProps) {
-  
+
   const handlePrint = () => {
     window.print();
   };
@@ -31,12 +31,12 @@ export default function PrescriptionPrintView({ prescription, patient, medicamen
   return (
     <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto print:bg-white print:p-0">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-8 relative print:shadow-none print:my-0 print:max-w-none print:rounded-none flex flex-col max-h-[90vh] print:max-h-none print:h-auto">
-        
+
         {/* Header - Hidden on print */}
         <div className="flex justify-between items-center p-4 border-b border-slate-200 print:hidden shrink-0">
           <h2 className="text-lg font-semibold text-slate-900">Aperçu de l'ordonnance</h2>
           <div className="flex space-x-2">
-            <button 
+            <button
               onClick={handlePrint}
               className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
             >
@@ -48,10 +48,10 @@ export default function PrescriptionPrintView({ prescription, patient, medicamen
             </button>
           </div>
         </div>
-        
+
         {/* Printable Area */}
         <div className="p-12 print:p-8 bg-white text-black overflow-y-auto grow" id="printable-prescription">
-          
+
           {/* Doctor Header */}
           <div className="text-center mb-12 border-b-2 border-slate-800 pb-6">
             <h1 className="text-2xl font-bold uppercase tracking-wider text-slate-900">Docteur Elidrissi Laila</h1>
@@ -87,7 +87,7 @@ export default function PrescriptionPrintView({ prescription, patient, medicamen
               const nomMedicament = medInfo ? (medInfo.nomMedicament || medInfo.nom_commercial) : 'Médicament inconnu';
               const dosage = medInfo?.dosage ? ` ${medInfo.dosage} ${medInfo.uniteDosage || ''}` : '';
               const forme = medInfo?.forme ? ` - ${medInfo.forme}` : '';
-              
+
               return (
                 <div key={idx} className="pl-4 border-l-4 border-slate-200">
                   <p className="font-bold text-lg text-slate-900">
@@ -111,7 +111,7 @@ export default function PrescriptionPrintView({ prescription, patient, medicamen
 
           {prescription?.notes && (
             <div className="mb-12 pt-6 border-t border-slate-200">
-              <p className="font-semibold mb-2">Autres indications :</p>
+              <p className="font-semibold mb-2">Notes :</p>
               <p className="whitespace-pre-wrap text-slate-800">{prescription.notes}</p>
             </div>
           )}
