@@ -1,10 +1,9 @@
 {
-  "projectId": "gen-lang-client-0783777468",
-  "appId": "1:376321920705:web:ccfab93fe9b03a1dcd0e40",
-  "apiKey": "AIzaSyD0Io0uEi57ySdw5fUMHEJOWNip7VGJIZ4",
-  "authDomain": "gen-lang-client-0783777468.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-04e18d09-b7bf-4bb1-b2e6-2ac2109b59cd",
-  "storageBucket": "gen-lang-client-0783777468.firebasestorage.app",
-  "messagingSenderId": "376321920705",
+  "projectId": "powermed-ac922",
+  "appId": "1:2752783795:web:6845e4292764f9feaf17c6",
+  "apiKey": "AIzaSyA8lzSXtlvpsTXjaCgTpM6x_BXInXWZ7Dc",
+  "authDomain": "powermed-ac922.firebaseapp.com",
+  "storageBucket": "powermed-ac922.firebasestorage.app",
+  "messagingSenderId": "2752783795",
   "measurementId": ""
 }
