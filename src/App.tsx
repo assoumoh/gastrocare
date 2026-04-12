@@ -22,6 +22,7 @@ import Admin from './pages/Admin';
 import VeoVideo from './pages/VeoVideo';
 import Prescriptions from './pages/Prescriptions';
 import SettingsCabinet from './pages/SettingsCabinet';
+import SalleAttente from './pages/SalleAttente';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { currentUser, appUser, loading } = useAuth();
@@ -53,6 +54,7 @@ export default function App() {
             <Route path="patients" element={<Patients />} />
             <Route path="patients/:id" element={<PatientDetail />} />
             <Route path="appointments" element={<Appointments />} />
+            <Route path="salle-attente" element={<SalleAttente />} />
             <Route path="consultations" element={<RoleGuard allowedRoles={['admin', 'medecin']}><Consultations /></RoleGuard>} />
             <Route path="prescriptions" element={<RoleGuard allowedRoles={['admin', 'medecin']}><Prescriptions /></RoleGuard>} />
             <Route path="medicaments" element={<RoleGuard allowedRoles={['admin', 'medecin']}><Medicaments /></RoleGuard>} />

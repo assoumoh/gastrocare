@@ -16,7 +16,8 @@ import {
   Video,
   FileSignature,
   Files,
-  TrendingUp
+  TrendingUp,
+  Clock
 } from 'lucide-react';
 import clsx from 'clsx';
 import Chatbot from './Chatbot';
@@ -26,6 +27,7 @@ const navigation = [
   { name: 'Finance', href: '/finance', icon: TrendingUp, roles: ['admin', 'medecin'] },
   { name: 'Patients', href: '/patients', icon: Users, roles: ['admin', 'medecin', 'assistante'] },
   { name: 'Rendez-vous', href: '/appointments', icon: Calendar, roles: ['admin', 'medecin', 'assistante'] },
+  { name: 'Salle d\'attente', href: '/salle-attente', icon: Clock, roles: ['admin', 'medecin', 'assistante'] },
   { name: 'Ordonnances', href: '/prescriptions', icon: FileSignature, roles: ['admin', 'medecin'] },
   { name: 'Médicaments', href: '/medicaments', icon: Pill, roles: ['admin', 'medecin'] },
   { name: 'Paiements', href: '/payments', icon: CreditCard, roles: ['admin', 'medecin', 'assistante'] },

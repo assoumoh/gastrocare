@@ -43,11 +43,11 @@ service cloud.firestore {
     }
 
     // ===============================================================
-    // Settings — Admin uniquement
+    // Settings — Admin uniquement (delete_patient_code, etc.)
     // ===============================================================
     match /settings/{settingId} {
-      allow read: if isAdmin();
-      allow write: if isAdmin();
+      allow read: if hasAccess();
+      allow write: if isAdmin() || isMedecin();
     }
 
     // ===============================================================
@@ -201,16 +201,6 @@ service cloud.firestore {
       allow update: if hasAccess();
       allow delete: if hasAccess();
     }
-  }
-}
-
-    // ===============================================================
-    // Settings Cabinet — Admin et Médecin
-    // ===============================================================
-    match /settings/cabinet {
-      allow read: if hasAccess();
-      allow write: if isAdmin() || isMedecin();
-    }
 
     // ===============================================================
     // File d'attente
@@ -231,3 +221,6 @@ service cloud.firestore {
       allow update: if hasAccess();
       allow delete: if isAdmin();
     }
+
+  }
+}
