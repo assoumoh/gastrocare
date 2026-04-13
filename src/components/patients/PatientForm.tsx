@@ -9,13 +9,44 @@ interface PatientFormProps {
   onClose: () => void;
 }
 
+// Génère un ID patient au format P-YYYYMMDD-XXX
+async function generatePatientId(): Promise<string> {
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0].replace(/-/g, '');
+  const prefix = `P-${dateStr}-`;
+
+  // Chercher le dernier patient créé aujourd'hui pour incrémenter
+  try {
+    const todayStart = now.toISOString().split('T')[0];
+    const q = query(
+      collection(db, 'patients'),
+      where('created_at', '>=', todayStart + 'T00:00:00'),
+      where('created_at', '<=', todayStart + 'T23:59:59'),
+      orderBy('created_at', 'desc'),
+      limit(1)
+    );
+    const snap = await getDocs(q);
+    let nextNum = 1;
+    if (!snap.empty) {
+      const lastId = snap.docs[0].data().num_dossier || '';
+      const match = lastId.match(/-(\d{3})$/);
+      if (match) nextNum = parseInt(match[1], 10) + 1;
+    }
+    return `${prefix}${String(nextNum).padStart(3, '0')}`;
+  } catch {
+    // Fallback simple avec timestamp
+    const fallback = String(now.getTime()).slice(-3);
+    return `${prefix}${fallback}`;
+  }
+}
+
 export default function PatientForm({ patient, onClose }: PatientFormProps) {
   const { appUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [datePremiereConsultation, setDatePremiereConsultation] = useState<string>('');
+  const [generatingId, setGeneratingId] = useState(false);
 
   const [formData, setFormData] = useState({
-    // Identité
     nom: patient?.nom || '',
     prenom: patient?.prenom || '',
     date_naissance: patient?.date_naissance || '',
@@ -25,8 +56,6 @@ export default function PatientForm({ patient, onClose }: PatientFormProps) {
     adresse: patient?.adresse || '',
     profession: patient?.profession || '',
     statut_familial: patient?.statut_familial || 'Célibataire',
-
-    // Informations administratives
     num_dossier: patient?.num_dossier || '',
     statutPatient: patient?.statutPatient || 'nouveau_patient',
     mutuelle: patient?.mutuelle || '',
@@ -34,11 +63,9 @@ export default function PatientForm({ patient, onClose }: PatientFormProps) {
     num_cnss: patient?.num_cnss || '',
     origine_patient: patient?.origine_patient || 'Direct',
     detail_origine: patient?.detail_origine || '',
-
-    // Données médicales
     allergies: patient?.allergies || '',
     antecedents_medicaux: patient?.antecedents_medicaux || '',
-    antecedents_digestifs: patient?.antecedents_digestifs || '',
+    antecedents_personnels: patient?.antecedents_personnels || patient?.antecedents_digestifs || '',
     antecedents_familiaux: patient?.antecedents_familiaux || '',
     antecedents_chirurgicaux: patient?.antecedents_chirurgicaux || '',
     habitudes_toxiques: patient?.habitudes_toxiques || '',
@@ -47,6 +74,17 @@ export default function PatientForm({ patient, onClose }: PatientFormProps) {
     suivi_long_terme: patient?.suivi_long_terme || 'Non',
     poids: patient?.poids || '',
   });
+
+  // Générer l'ID Patient automatiquement pour les nouveaux patients
+  useEffect(() => {
+    if (!patient?.id && !formData.num_dossier) {
+      setGeneratingId(true);
+      generatePatientId().then((id) => {
+        setFormData(prev => ({ ...prev, num_dossier: id }));
+        setGeneratingId(false);
+      });
+    }
+  }, []);
 
   useEffect(() => {
     const fetchFirstConsultation = async () => {
@@ -72,7 +110,6 @@ export default function PatientForm({ patient, onClose }: PatientFormProps) {
         setDatePremiereConsultation('Nouveau patient');
       }
     };
-
     fetchFirstConsultation();
   }, [patient?.id]);
 
@@ -86,7 +123,7 @@ export default function PatientForm({ patient, onClose }: PatientFormProps) {
     setLoading(true);
     try {
       let dataToSave: any = { ...formData };
-      
+
       if (appUser?.role === 'assistante') {
         dataToSave = {
           nom: formData.nom,
@@ -132,6 +169,8 @@ export default function PatientForm({ patient, onClose }: PatientFormProps) {
     }
   };
 
+  const isEditing = !!patient?.id;
+
   return (
     <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl my-8">
@@ -143,9 +182,9 @@ export default function PatientForm({ patient, onClose }: PatientFormProps) {
             <X className="h-6 w-6" />
           </button>
         </div>
-        
+
         <form onSubmit={handleSubmit} className="p-6 space-y-8">
-          
+
           {/* Section: Identité */}
           <div className="space-y-4">
             <h3 className="text-lg font-medium text-slate-900 border-b pb-2">Identité</h3>
@@ -209,8 +248,15 @@ export default function PatientForm({ patient, onClose }: PatientFormProps) {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700">N° Dossier</label>
-                <input type="text" name="num_dossier" value={formData.num_dossier} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
+                <label className="block text-sm font-medium text-slate-700">ID Patient</label>
+                <input
+                  type="text"
+                  name="num_dossier"
+                  value={generatingId ? 'Génération...' : formData.num_dossier}
+                  readOnly
+                  className="mt-1 block w-full rounded-md border-slate-300 shadow-sm sm:text-sm border px-3 py-2 bg-slate-100 text-slate-600 cursor-not-allowed font-mono"
+                />
+                <p className="mt-1 text-xs text-slate-400">Généré automatiquement à l'inscription</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700">Mutuelle</label>
@@ -257,7 +303,7 @@ export default function PatientForm({ patient, onClose }: PatientFormProps) {
                 <label className="block text-sm font-medium text-slate-700">Poids (kg)</label>
                 <input type="number" step="0.1" name="poids" value={formData.poids} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
               </div>
-              
+
               {appUser?.role !== 'assistante' && (
                 <>
                   <div>
@@ -265,8 +311,8 @@ export default function PatientForm({ patient, onClose }: PatientFormProps) {
                     <textarea name="antecedents_medicaux" rows={2} value={formData.antecedents_medicaux} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700">Antécédents Digestifs</label>
-                    <textarea name="antecedents_digestifs" rows={2} value={formData.antecedents_digestifs} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
+                    <label className="block text-sm font-medium text-slate-700">Antécédents Personnels</label>
+                    <textarea name="antecedents_personnels" rows={2} value={formData.antecedents_personnels} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700">Antécédents Familiaux</label>
@@ -306,9 +352,7 @@ export default function PatientForm({ patient, onClose }: PatientFormProps) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-500">Date Première Consultation</label>
-                <div className="mt-1 text-sm text-slate-900 font-medium">
-                  {datePremiereConsultation}
-                </div>
+                <div className="mt-1 text-sm text-slate-900 font-medium">{datePremiereConsultation}</div>
               </div>
             </div>
           </div>
