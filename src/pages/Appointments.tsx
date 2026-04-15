@@ -60,16 +60,13 @@ export default function Appointments() {
     if (viewMode === 'day') {
       qAppts = query(
         collection(db, 'appointments'),
-        where('date_rdv', '==', startStr),
-        orderBy('heure_rdv')
+        where('date_rdv', '==', startStr)
       );
       qConsults = query(
         collection(db, 'consultations'),
         where('date_consultation', '==', startStr)
       );
     } else {
-      // Pour semaine/mois, requête sans double orderBy pour éviter les problèmes d'index
-      // On trie côté client
       qAppts = query(
         collection(db, 'appointments'),
         where('date_rdv', '>=', startStr),

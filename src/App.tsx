@@ -56,7 +56,7 @@ export default function App() {
             <Route path="appointments" element={<Appointments />} />
             <Route path="salle-attente" element={<SalleAttente />} />
             <Route path="consultations" element={<RoleGuard allowedRoles={['admin', 'medecin']}><Consultations /></RoleGuard>} />
-            <Route path="prescriptions" element={<RoleGuard allowedRoles={['admin', 'medecin']}><Prescriptions /></RoleGuard>} />
+            <Route path="prescriptions" element={<RoleGuard allowedRoles={['admin', 'medecin', 'assistante']}><Prescriptions /></RoleGuard>} />
             <Route path="medicaments" element={<RoleGuard allowedRoles={['admin', 'medecin']}><Medicaments /></RoleGuard>} />
             <Route path="medicaments/import" element={<RoleGuard allowedRoles={['admin']}><ImportMedicaments /></RoleGuard>} />
             <Route path="exams" element={<RoleGuard allowedRoles={['admin', 'medecin']}><Exams /></RoleGuard>} />

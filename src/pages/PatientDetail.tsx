@@ -24,6 +24,8 @@ const allTabs = [
 
 const assistanteTabs = [
   { name: 'Informations', id: 'info', icon: User },
+  { name: 'Consultations', id: 'consultations', icon: Activity },
+  { name: 'Ordonnances', id: 'prescriptions', icon: Pill },
   { name: 'Paiement', id: 'finance', icon: CreditCard },
 ];
 
@@ -191,7 +193,7 @@ export default function PatientDetail() {
                 <h4 className="text-base font-medium text-slate-900 border-b pb-2 mb-4">Données Médicales</h4>
                 <dl className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
                   <div><dt className="text-sm font-medium text-slate-500">Allergies</dt><dd className="mt-1 text-sm text-red-600 font-medium">{patient.allergies || 'Aucune'}</dd></div>
-                  <div><dt className="text-sm font-medium text-slate-500">Poids (kg)</dt><dd className="mt-1 text-sm text-slate-900">{patient.poids || '-'}</dd></div>
+                  <div><dt className="text-sm font-medium text-slate-500">Poids</dt><dd className="mt-1 text-sm text-slate-900">{patient.poids ? `${patient.poids} kg` : '-'}</dd></div>
                   <div className="sm:col-span-2"><dt className="text-sm font-medium text-slate-500">Antécédents Médicaux</dt><dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.antecedents_medicaux || 'Aucun'}</dd></div>
                   <div className="sm:col-span-2"><dt className="text-sm font-medium text-slate-500">Antécédents Personnels</dt><dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.antecedents_personnels || patient.antecedents_digestifs || 'Aucun'}</dd></div>
                   <div className="sm:col-span-2"><dt className="text-sm font-medium text-slate-500">Antécédents Familiaux</dt><dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.antecedents_familiaux || 'Aucun'}</dd></div>
@@ -210,7 +212,7 @@ export default function PatientDetail() {
                 <h4 className="text-base font-medium text-slate-900 border-b pb-2 mb-4">Données Pré-consultation</h4>
                 <dl className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
                   <div><dt className="text-sm font-medium text-slate-500">Allergies</dt><dd className="mt-1 text-sm text-red-600 font-medium">{patient.allergies || 'Aucune'}</dd></div>
-                  <div><dt className="text-sm font-medium text-slate-500">Poids (kg)</dt><dd className="mt-1 text-sm text-slate-900">{patient.poids || '-'}</dd></div>
+                  <div><dt className="text-sm font-medium text-slate-500">Poids</dt><dd className="mt-1 text-sm text-slate-900">{patient.poids ? `${patient.poids} kg` : '-'}</dd></div>
                 </dl>
               </div>
             )}

@@ -5,8 +5,10 @@ import { Plus, Search, FileSignature, User, Calendar, Pill, Printer } from 'luci
 import PrescriptionForm from '../components/prescriptions/PrescriptionForm';
 import PrescriptionPrintView from '../components/prescriptions/PrescriptionPrintView';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Prescriptions() {
+  const { appUser } = useAuth();
   const [prescriptions, setPrescriptions] = useState<any[]>([]);
   const [patients, setPatients] = useState<Record<string, any>>({});
   const [medicaments, setMedicaments] = useState<Record<string, any>>({});
@@ -14,6 +16,8 @@ export default function Prescriptions() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
   const [selectedPrescription, setSelectedPrescription] = useState<any>(null);
+
+  const isAssistante = appUser?.role === 'assistante';
 
   useEffect(() => {
     const unsubPatients = onSnapshot(collection(db, 'patients'), (snapshot) => {
@@ -52,6 +56,7 @@ export default function Prescriptions() {
   });
 
   const handleEdit = (prescription: any) => {
+    if (isAssistante) return;
     setSelectedPrescription(prescription);
     setIsFormOpen(true);
   };
@@ -76,15 +81,17 @@ export default function Prescriptions() {
     <div className="space-y-6">
       <div className="sm:flex sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold text-slate-900">Ordonnances</h1>
-        <div className="mt-4 sm:mt-0">
-          <button 
-            onClick={() => setIsFormOpen(true)}
-            className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:w-auto"
-          >
-            <Plus className="-ml-1 mr-2 h-5 w-5" />
-            Nouvelle Ordonnance
-          </button>
-        </div>
+        {!isAssistante && (
+          <div className="mt-4 sm:mt-0">
+            <button
+              onClick={() => { setSelectedPrescription(null); setIsFormOpen(true); }}
+              className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:w-auto"
+            >
+              <Plus className="-ml-1 mr-2 h-5 w-5" />
+              Nouvelle Ordonnance
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="bg-white shadow rounded-lg overflow-hidden">
@@ -119,13 +126,13 @@ export default function Prescriptions() {
                         <Link to={`/patients/${prescription.patient_id}`} className="text-sm font-medium text-indigo-600 hover:text-indigo-900" onClick={(e) => e.stopPropagation()}>
                           {patient ? `${patient.nom} ${patient.prenom}` : 'Patient inconnu'}
                         </Link>
-                        <span className="mx-2 text-slate-300">•</span>
+                        <span className="mx-2 text-slate-300">|</span>
                         <Calendar className="mr-1.5 h-4 w-4 text-slate-400" />
                         <span className="text-sm text-slate-500">
-                          {new Date(prescription.date_prescription).toLocaleDateString('fr-FR')}
+                          {new Date(prescription.date_prescription + 'T12:00:00').toLocaleDateString('fr-FR')}
                         </span>
                       </div>
-                      
+
                       <div className="mt-3 space-y-2">
                         {prescription.medicaments?.map((med: any, idx: number) => {
                           const medInfo = medicaments[med.medicament_id];
@@ -134,7 +141,7 @@ export default function Prescriptions() {
                               <Pill className="h-4 w-4 text-slate-400 mr-2 mt-0.5" />
                               <div>
                                 <span className="font-medium text-slate-900">
-                                  {medInfo ? (medInfo.nomMedicament || medInfo.nom_commercial) : 'Médicament inconnu'}
+                                  {med.nomMedicament || (medInfo ? (medInfo.nomMedicament || medInfo.nom_commercial) : 'Médicament inconnu')}
                                 </span>
                                 <span className="text-slate-500 ml-2">
                                   {med.posologie} - {med.duree}
@@ -144,7 +151,7 @@ export default function Prescriptions() {
                           );
                         })}
                       </div>
-                      
+
                       {prescription.notes && (
                         <div className="mt-2 text-sm text-slate-600 italic">
                           Notes: {prescription.notes}
@@ -155,7 +162,7 @@ export default function Prescriptions() {
                   <div className="ml-4 flex-shrink-0">
                     <button
                       onClick={(e) => handlePrint(e, prescription)}
-                      className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm text-white bg-indigo-100 text-indigo-700 hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                      className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm bg-indigo-100 text-indigo-700 hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                       title="Imprimer l'ordonnance"
                     >
                       <Printer className="h-5 w-5" />
@@ -173,14 +180,14 @@ export default function Prescriptions() {
         </ul>
       </div>
 
-      {isFormOpen && <PrescriptionForm prescription={selectedPrescription} onClose={handleCloseForm} />}
-      
+      {isFormOpen && !isAssistante && <PrescriptionForm prescription={selectedPrescription} onClose={handleCloseForm} />}
+
       {isPrintOpen && selectedPrescription && (
-        <PrescriptionPrintView 
-          prescription={selectedPrescription} 
-          patient={patients[selectedPrescription.patient_id]} 
+        <PrescriptionPrintView
+          prescription={selectedPrescription}
+          patient={patients[selectedPrescription.patient_id]}
           medicaments={medicaments}
-          onClose={handleClosePrint} 
+          onClose={handleClosePrint}
         />
       )}
     </div>

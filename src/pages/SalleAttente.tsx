@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import type { FileAttenteEntry, StatutFileAttente, PrioriteFileAttente } from '../types';
 import PreConsultationForm from '../components/salle-attente/PreConsultationForm';
-import PostConsultationModal from '../components/salle-attente/PostConsultationModal';
+import PostConsultationFlow from '../components/salle-attente/PostConsultationFlow';
 
 interface PatientInfo {
     id: string; nom: string; prenom: string; telephone?: string; allergies?: string;
@@ -68,7 +68,7 @@ export default function SalleAttente() {
         patientName: string;
     } | null>(null);
 
-    // Post-consultation modal
+    // Post-consultation flow
     const [postConsultTarget, setPostConsultTarget] = useState<{
         entryId: string;
         patientName: string;
@@ -162,7 +162,6 @@ export default function SalleAttente() {
     const isAssistante = appUser?.role === 'assistante';
     const isMedecinOrAdmin = appUser?.role === 'admin' || appUser?.role === 'medecin';
 
-    // --- Duration helpers ---
     const formatDuration = (minutes: number): string => {
         if (minutes < 1) return '< 1 min';
         if (minutes < 60) return `${Math.round(minutes)} min`;
@@ -179,25 +178,13 @@ export default function SalleAttente() {
         const finConsult = entry.heure_fin_consultation ? parseISO(entry.heure_fin_consultation) : null;
         const sortie = entry.heure_sortie ? parseISO(entry.heure_sortie) : null;
 
-        const dureeAttente = arrivee
-            ? differenceInMinutes(debutPreConsult || debutConsult || now, arrivee)
-            : null;
-        const dureePreConsult = debutPreConsult && finPreConsult
-            ? differenceInMinutes(finPreConsult, debutPreConsult)
-            : debutPreConsult
-                ? differenceInMinutes(now, debutPreConsult)
-                : null;
-        const dureeConsult = debutConsult && finConsult
-            ? differenceInMinutes(finConsult, debutConsult)
-            : debutConsult
-                ? differenceInMinutes(now, debutConsult)
-                : null;
+        const dureeAttente = arrivee ? differenceInMinutes(debutPreConsult || debutConsult || now, arrivee) : null;
+        const dureePreConsult = debutPreConsult && finPreConsult ? differenceInMinutes(finPreConsult, debutPreConsult) : debutPreConsult ? differenceInMinutes(now, debutPreConsult) : null;
+        const dureeConsult = debutConsult && finConsult ? differenceInMinutes(finConsult, debutConsult) : debutConsult ? differenceInMinutes(now, debutConsult) : null;
 
         return {
             arrivee: entry.heure_arrivee || (arrivee ? format(arrivee, 'HH:mm') : '-'),
-            dureeAttente,
-            dureePreConsult,
-            dureeConsult,
+            dureeAttente, dureePreConsult, dureeConsult,
             sortie: sortie ? format(sortie, 'HH:mm') : null,
         };
     };
@@ -206,8 +193,6 @@ export default function SalleAttente() {
     const handlePreConsult = async (entry: FileAttenteEntry & { [key: string]: any }) => {
         const patient = patientsMap[entry.patient_id];
         const patientName = patient ? `${patient.nom} ${patient.prenom}` : 'Patient';
-
-        // Si pas encore en pré-consultation, changer le statut
         if (entry.statut === 'en_attente') {
             const nowDate = new Date();
             await updateDoc(doc(db, 'file_attente', entry.id), {
@@ -216,57 +201,38 @@ export default function SalleAttente() {
                 updated_at: nowDate.toISOString(),
             });
         }
-
-        setPreConsultTarget({
-            entry: { ...entry, statut: 'en_pre_consultation' },
-            patientName,
-        });
+        setPreConsultTarget({ entry: { ...entry, statut: 'en_pre_consultation' }, patientName });
     };
 
     const handleMarkReady = async (entry: FileAttenteEntry) => {
         try {
-            await updateDoc(doc(db, 'file_attente', entry.id), {
-                statut: 'pret',
-                updated_at: new Date().toISOString(),
-            });
-        } catch (err) {
-            showError('Erreur lors du changement de statut.');
-        }
+            await updateDoc(doc(db, 'file_attente', entry.id), { statut: 'pret', updated_at: new Date().toISOString() });
+        } catch (err) { showError('Erreur lors du changement de statut.'); }
     };
 
     const handleStartConsultation = async (entry: FileAttenteEntry & { [key: string]: any }) => {
         try {
             const nowDate = new Date();
             await updateDoc(doc(db, 'file_attente', entry.id), {
-                statut: 'en_consultation',
-                heure_debut_consultation: nowDate.toISOString(),
-                updated_at: nowDate.toISOString(),
+                statut: 'en_consultation', heure_debut_consultation: nowDate.toISOString(), updated_at: nowDate.toISOString(),
             });
-            // Naviguer vers la fiche patient avec onglet consultations
             navigate(`/patients/${entry.patient_id}?tab=consultations&consultationMode=active`);
-        } catch (err) {
-            showError('Erreur lors du démarrage de la consultation.');
-        }
+        } catch (err) { showError('Erreur lors du démarrage de la consultation.'); }
     };
 
     const handleTerminate = async (entry: FileAttenteEntry & { [key: string]: any }) => {
         const patient = patientsMap[entry.patient_id];
         const patientName = patient ? `${patient.nom} ${patient.prenom}` : 'Patient';
         setPostConsultTarget({
-            entryId: entry.id,
-            patientName,
-            appointmentId: entry.appointment_id,
-            patientId: entry.patient_id,
-            consultationId: entry.consultation_id,
+            entryId: entry.id, patientName, appointmentId: entry.appointment_id,
+            patientId: entry.patient_id, consultationId: entry.consultation_id,
         });
     };
 
     const setStatus = async (entryId: string, statut: StatutFileAttente, appointmentId?: string) => {
         try {
             const updates: any = { statut, updated_at: new Date().toISOString() };
-            if (statut === 'termine' || statut === 'annule') {
-                updates.heure_sortie = new Date().toISOString();
-            }
+            if (statut === 'termine' || statut === 'annule') updates.heure_sortie = new Date().toISOString();
             await updateDoc(doc(db, 'file_attente', entryId), updates);
             if (statut === 'annule' && appointmentId) {
                 await updateDoc(doc(db, 'appointments', appointmentId), { statut: 'confirmé', updated_at: new Date().toISOString() });
@@ -275,9 +241,8 @@ export default function SalleAttente() {
     };
 
     const changePriorite = async (entryId: string, priorite: PrioriteFileAttente) => {
-        try {
-            await updateDoc(doc(db, 'file_attente', entryId), { priorite, updated_at: new Date().toISOString() });
-        } catch (err) { showError('Erreur lors du changement de priorité.'); }
+        try { await updateDoc(doc(db, 'file_attente', entryId), { priorite, updated_at: new Date().toISOString() }); }
+        catch (err) { showError('Erreur lors du changement de priorité.'); }
     };
 
     const moveEntry = async (entryIndex: number, direction: 'up' | 'down') => {
@@ -334,7 +299,6 @@ export default function SalleAttente() {
         return allPatients.filter((p) => p.nom.toLowerCase().includes(s) || p.prenom.toLowerCase().includes(s) || (p.telephone || '').includes(s)).slice(0, 10);
     }, [patientSearch, allPatients]);
 
-    // Bouton contextuel pour chaque entrée
     const getActionButtons = (entry: FileAttenteEntry & { [key: string]: any }) => {
         const buttons: React.ReactNode[] = [];
         if (entry.statut === 'en_attente') {
@@ -394,7 +358,7 @@ export default function SalleAttente() {
                 </div>
             )}
 
-            {/* Stats – redesigned */}
+            {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                 {[
                     { icon: Clock, value: stats.enFile, label: 'En file', color: 'text-orange-500', vColor: 'text-orange-600' },
@@ -515,7 +479,6 @@ export default function SalleAttente() {
                                             )}
                                         </div>
                                     </div>
-                                    {/* Timers row */}
                                     <div className="mt-2 ml-14 flex items-center gap-4 flex-wrap text-xs text-slate-500">
                                         <span className="flex items-center gap-1"><Timer className="h-3 w-3" />Arrivée : {timers.arrivee}</span>
                                         {timers.dureeAttente !== null && <span>Attente : <strong className="text-orange-600">{formatDuration(timers.dureeAttente)}</strong></span>}
@@ -631,9 +594,9 @@ export default function SalleAttente() {
                 />
             )}
 
-            {/* Post-consultation modal */}
+            {/* Post-consultation flow (3 étapes: examens → ordonnance → checklist) */}
             {postConsultTarget && (
-                <PostConsultationModal
+                <PostConsultationFlow
                     entryId={postConsultTarget.entryId}
                     patientName={postConsultTarget.patientName}
                     appointmentId={postConsultTarget.appointmentId}

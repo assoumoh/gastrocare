@@ -159,6 +159,10 @@ export default function PreConsultationForm({ entry, patientName, onClose }: Pre
                 pre_consultation: {
                     poids: formData.poids,
                     tension,
+                    glycemie: formData.glycemie,
+                    temperature: formData.temperature,
+                    saturation_o2: formData.saturation_o2,
+                    frequence_cardiaque: formData.frequence_cardiaque,
                     allergies: formData.allergies,
                     observations: formData.observations,
                     effectuee_par: appUser?.uid,
@@ -212,7 +216,7 @@ export default function PreConsultationForm({ entry, patientName, onClose }: Pre
                                         name="poids"
                                         value={formData.poids}
                                         onChange={handleChange}
-                                        placeholder="Ex: 75.5"
+                                        placeholder="75.5"
                                         className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
                                     />
                                 </div>
