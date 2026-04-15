@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, query, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, query, onSnapshot, orderBy, where, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { X } from 'lucide-react';
+import { X, AlertTriangle } from 'lucide-react';
 
 interface AppointmentFormProps {
   appointment?: any;
@@ -15,6 +15,7 @@ export default function AppointmentForm({ appointment, patientId, onClose }: App
   const [loading, setLoading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [patients, setPatients] = useState<any[]>([]);
+  const [duplicateWarning, setDuplicateWarning] = useState('');
   const [formData, setFormData] = useState({
     patient_id: appointment?.patient_id || patientId || '',
     date_rdv: appointment?.date_rdv || new Date().toISOString().split('T')[0],
@@ -32,12 +33,49 @@ export default function AppointmentForm({ appointment, patientId, onClose }: App
     return () => unsubscribe();
   }, []);
 
+  // Vérification doublon en temps réel
+  useEffect(() => {
+    if (!formData.patient_id || !formData.date_rdv) {
+      setDuplicateWarning('');
+      return;
+    }
+    // Ne pas vérifier si on édite le même RDV
+    const checkDuplicate = async () => {
+      try {
+        const q = query(
+          collection(db, 'appointments'),
+          where('patient_id', '==', formData.patient_id),
+          where('date_rdv', '==', formData.date_rdv)
+        );
+        const snap = await getDocs(q);
+        const existingOther = snap.docs.filter(d => d.id !== appointment?.id);
+        if (existingOther.length > 0) {
+          const patient = patients.find(p => p.id === formData.patient_id);
+          const name = patient ? `${patient.nom} ${patient.prenom}` : 'Ce patient';
+          setDuplicateWarning(`${name} a déjà un rendez-vous le ${formData.date_rdv}.`);
+        } else {
+          setDuplicateWarning('');
+        }
+      } catch (err) {
+        // silently ignore
+      }
+    };
+    checkDuplicate();
+  }, [formData.patient_id, formData.date_rdv, appointment?.id, patients]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Bloquer si doublon détecté (sauf édition)
+    if (duplicateWarning && !appointment?.id) {
+      const confirm = window.confirm(`${duplicateWarning}\nVoulez-vous quand même créer ce rendez-vous ?`);
+      if (!confirm) return;
+    }
+
     setLoading(true);
     try {
       if (appointment?.id) {
@@ -87,8 +125,15 @@ export default function AppointmentForm({ appointment, patientId, onClose }: App
             <X className="h-6 w-6" />
           </button>
         </div>
-        
+
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {duplicateWarning && (
+            <div className="rounded-md bg-amber-50 border border-amber-200 p-3 flex items-start">
+              <AlertTriangle className="h-5 w-5 text-amber-500 mt-0.5 mr-2 flex-shrink-0" />
+              <p className="text-sm text-amber-700">{duplicateWarning}</p>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-slate-700">Patient *</label>
             <select required name="patient_id" value={formData.patient_id} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2">

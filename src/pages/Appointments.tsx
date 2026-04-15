@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, orderBy, where, addDoc, updateDoc, doc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Calendar as CalendarIcon, Clock, User, ChevronLeft, ChevronRight, LogIn } from 'lucide-react';
+import { Plus, Calendar as CalendarIcon, Clock, User, ChevronLeft, ChevronRight, LogIn, AlertTriangle } from 'lucide-react';
 import AppointmentForm from '../components/appointments/AppointmentForm';
 import clsx from 'clsx';
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, addDays, addWeeks, addMonths, subDays, subWeeks, subMonths, isSameDay } from 'date-fns';
@@ -27,6 +27,7 @@ export default function Appointments() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [sendingToQueue, setSendingToQueue] = useState<string | null>(null);
+  const [queryError, setQueryError] = useState('');
 
   useEffect(() => {
     const unsubPatients = onSnapshot(collection(db, 'patients'), (snapshot) => {
@@ -67,12 +68,12 @@ export default function Appointments() {
         where('date_consultation', '==', startStr)
       );
     } else {
+      // Pour semaine/mois, requête sans double orderBy pour éviter les problèmes d'index
+      // On trie côté client
       qAppts = query(
         collection(db, 'appointments'),
         where('date_rdv', '>=', startStr),
-        where('date_rdv', '<=', endStr),
-        orderBy('date_rdv'),
-        orderBy('heure_rdv')
+        where('date_rdv', '<=', endStr)
       );
       qConsults = query(
         collection(db, 'consultations'),
@@ -81,12 +82,25 @@ export default function Appointments() {
       );
     }
 
+    setQueryError('');
+
     const unsubscribeAppts = onSnapshot(qAppts, (snapshot) => {
-      setAppointments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Tri client-side pour garantir l'ordre même sans index composite
+      data.sort((a: any, b: any) => {
+        if (a.date_rdv !== b.date_rdv) return a.date_rdv.localeCompare(b.date_rdv);
+        return (a.heure_rdv || '').localeCompare(b.heure_rdv || '');
+      });
+      setAppointments(data);
+    }, (error) => {
+      console.error('Erreur chargement RDV:', error);
+      setQueryError('Erreur de chargement des rendez-vous. Vérifiez les index Firestore.');
     });
 
     const unsubscribeConsults = onSnapshot(qConsults, (snapshot) => {
       setConsultations(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      console.error('Erreur chargement consultations:', error);
     });
 
     return () => {
@@ -106,16 +120,21 @@ export default function Appointments() {
     }
   };
 
+  // FIX: Utiliser des fonctions de mise à jour fonctionnelles pour éviter les closures stales
   const handlePrev = () => {
-    if (viewMode === 'day') setSelectedDate(subDays(selectedDate, 1));
-    if (viewMode === 'week') setSelectedDate(subWeeks(selectedDate, 1));
-    if (viewMode === 'month') setSelectedDate(subMonths(selectedDate, 1));
+    setSelectedDate(prev => {
+      if (viewMode === 'day') return subDays(prev, 1);
+      if (viewMode === 'week') return subWeeks(prev, 1);
+      return subMonths(prev, 1);
+    });
   };
 
   const handleNext = () => {
-    if (viewMode === 'day') setSelectedDate(addDays(selectedDate, 1));
-    if (viewMode === 'week') setSelectedDate(addWeeks(selectedDate, 1));
-    if (viewMode === 'month') setSelectedDate(addMonths(selectedDate, 1));
+    setSelectedDate(prev => {
+      if (viewMode === 'day') return addDays(prev, 1);
+      if (viewMode === 'week') return addWeeks(prev, 1);
+      return addMonths(prev, 1);
+    });
   };
 
   const handleToday = () => {
@@ -136,11 +155,10 @@ export default function Appointments() {
 
   // Envoyer un RDV en salle d'attente
   const handleSendToQueue = async (apt: any, e: React.MouseEvent) => {
-    e.stopPropagation(); // Ne pas ouvrir le formulaire d'édition
+    e.stopPropagation();
     if (sendingToQueue) return;
     setSendingToQueue(apt.id);
     try {
-      // Vérifier qu'il n'est pas déjà dans la file
       const checkQuery = query(
         collection(db, 'file_attente'),
         where('appointment_id', '==', apt.id),
@@ -153,7 +171,6 @@ export default function Appointments() {
         return;
       }
 
-      // Trouver le prochain numéro d'ordre
       const todayQuery = query(
         collection(db, 'file_attente'),
         where('date', '==', apt.date_rdv)
@@ -168,6 +185,7 @@ export default function Appointments() {
         date: apt.date_rdv,
         numero_ordre: maxOrdre + 1,
         heure_arrivee: format(now, 'HH:mm'),
+        heure_arrivee_iso: now.toISOString(),
         statut: 'en_attente',
         priorite: 'normale',
         motif: apt.motif || '',
@@ -176,7 +194,6 @@ export default function Appointments() {
         updated_at: now.toISOString(),
       });
 
-      // Mettre à jour le statut du RDV
       await updateDoc(doc(db, 'appointments', apt.id), {
         statut: 'en_salle',
         updated_at: now.toISOString(),
@@ -189,9 +206,8 @@ export default function Appointments() {
     }
   };
 
-  // Vérifier si un RDV peut être envoyé en salle
   const canSendToQueue = (apt: any): boolean => {
-    return ['planifie', 'planifié', 'confirmé', 'confirme'].includes(apt.statut);
+    return ['planifie', 'planifié', 'prévu', 'confirmé', 'confirme'].includes(apt.statut);
   };
 
   // Group appointments by date for week/month views
@@ -202,7 +218,7 @@ export default function Appointments() {
     return acc;
   }, {} as Record<string, any[]>);
 
-  // Composant de rendu d'un RDV (réutilisé en vue jour et semaine/mois)
+  // Composant de rendu d'un RDV
   const renderAppointmentRow = (apt: any, compact: boolean = false) => {
     const patient = patients[apt.patient_id];
     const consultation = consultations.find(c => c.patient_id === apt.patient_id && c.date_consultation === apt.date_rdv);
@@ -312,6 +328,13 @@ export default function Appointments() {
         </div>
       </div>
 
+      {queryError && (
+        <div className="rounded-md bg-red-50 border border-red-200 p-4 flex items-start">
+          <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5 mr-3 flex-shrink-0" />
+          <p className="text-sm text-red-700">{queryError}</p>
+        </div>
+      )}
+
       <div className="bg-white shadow rounded-lg overflow-hidden flex flex-col">
         {/* Navigation Toolbar */}
         <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
@@ -360,10 +383,10 @@ export default function Appointments() {
               {Object.keys(groupedAppointments).sort().map(dateStr => (
                 <div key={dateStr} className="bg-white">
                   <div className="bg-slate-100 px-4 py-2 font-medium text-sm text-slate-700 sticky top-0 z-10">
-                    {format(new Date(dateStr), 'EEEE d MMMM yyyy', { locale: fr })}
+                    {format(new Date(dateStr + 'T12:00:00'), 'EEEE d MMMM yyyy', { locale: fr })}
                   </div>
                   <ul className="divide-y divide-slate-100">
-                    {groupedAppointments[dateStr].map((apt) => (
+                    {groupedAppointments[dateStr].map((apt: any) => (
                       <li
                         key={apt.id}
                         className="hover:bg-slate-50 transition-colors pl-8 cursor-pointer"

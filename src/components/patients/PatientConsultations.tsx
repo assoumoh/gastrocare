@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Calendar, Stethoscope, Edit, DollarSign, FileText, Pill, Search } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import ConsultationForm from '../consultations/ConsultationForm';
 
 interface PatientConsultationsProps {
@@ -16,18 +17,21 @@ const STATUT_BADGES: Record<string, { label: string, className: string }> = {
 };
 
 export default function PatientConsultations({ patientId }: PatientConsultationsProps) {
+  const [searchParams] = useSearchParams();
   const [consultations, setConsultations] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [exams, setExams] = useState<any[]>([]);
   const [prescriptions, setPrescriptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingConsultation, setEditingConsultation] = useState<any | null>(null);
-  
+  const [autoOpened, setAutoOpened] = useState(false);
+
   // Filters
   const [dateDebut, setDateDebut] = useState('');
   const [dateFin, setDateFin] = useState('');
 
   useEffect(() => {
+    // Essayer avec orderBy, fallback sans orderBy si index manquant
     const q = query(
       collection(db, 'consultations'),
       where('patient_id', '==', patientId),
@@ -37,10 +41,41 @@ export default function PatientConsultations({ patientId }: PatientConsultations
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setConsultations(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setLoading(false);
+    }, (error) => {
+      console.warn('Index manquant pour consultations, fallback sans orderBy:', error);
+      // Fallback: query sans orderBy, tri côté client
+      const qFallback = query(
+        collection(db, 'consultations'),
+        where('patient_id', '==', patientId)
+      );
+      const unsubFallback = onSnapshot(qFallback, (snap) => {
+        const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        data.sort((a: any, b: any) => (b.date_consultation || '').localeCompare(a.date_consultation || ''));
+        setConsultations(data);
+        setLoading(false);
+      });
+      return () => unsubFallback();
     });
 
     return () => unsubscribe();
   }, [patientId]);
+
+  // Auto-ouverture de la consultation active si on vient de la salle d'attente
+  useEffect(() => {
+    if (autoOpened || loading || consultations.length === 0) return;
+    const mode = searchParams.get('consultationMode');
+    if (mode === 'active') {
+      const today = new Date().toISOString().split('T')[0];
+      const todayConsult = consultations.find(c =>
+        c.date_consultation === today &&
+        (c.statutConsultation === 'pre_consultation' || c.statutConsultation === 'en_cours' || c.statutConsultation === 'en_attente')
+      );
+      if (todayConsult) {
+        setEditingConsultation(todayConsult);
+      }
+      setAutoOpened(true);
+    }
+  }, [consultations, loading, searchParams, autoOpened]);
 
   useEffect(() => {
     const qPayments = query(
@@ -157,7 +192,7 @@ export default function PatientConsultations({ patientId }: PatientConsultations
                           <div className="flex justify-between items-center mb-2">
                             <p className="text-sm text-slate-500 flex items-center">
                               <Calendar className="mr-1.5 h-4 w-4 text-slate-400" />
-                              {new Date(consultation.date_consultation).toLocaleDateString('fr-FR')}
+                              {new Date(consultation.date_consultation + 'T12:00:00').toLocaleDateString('fr-FR')}
                             </p>
                             <div className="flex items-center space-x-3">
                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusInfo.className}`}>
@@ -172,7 +207,7 @@ export default function PatientConsultations({ patientId }: PatientConsultations
                               </button>
                             </div>
                           </div>
-                          
+
                           <div className="bg-slate-50 rounded-lg p-4 border border-slate-200 space-y-4">
                             {/* Pré-consultation */}
                             <div>
@@ -251,9 +286,9 @@ export default function PatientConsultations({ patientId }: PatientConsultations
                                         <span className="text-slate-500">- {payment.mode_paiement}</span>
                                       </div>
                                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize
-                                        ${(payment.statut_paiement === 'payé' || payment.statut_paiement === 'réglé') ? 'bg-green-100 text-green-800' : 
-                                          (payment.statut_paiement === 'non payé' || payment.statut_paiement === 'en_attente') ? 'bg-red-100 text-red-800' : 
-                                          'bg-orange-100 text-orange-800'}`}>
+                                        ${(payment.statut_paiement === 'payé' || payment.statut_paiement === 'réglé') ? 'bg-green-100 text-green-800' :
+                                          (payment.statut_paiement === 'non payé' || payment.statut_paiement === 'en_attente') ? 'bg-red-100 text-red-800' :
+                                            'bg-orange-100 text-orange-800'}`}>
                                         {payment.statut_paiement}
                                       </span>
                                     </div>
