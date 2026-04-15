@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, orderBy, where } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, where, addDoc, updateDoc, doc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Plus, Calendar as CalendarIcon, Clock, User, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { Plus, Calendar as CalendarIcon, Clock, User, ChevronLeft, ChevronRight, LogIn } from 'lucide-react';
 import AppointmentForm from '../components/appointments/AppointmentForm';
 import clsx from 'clsx';
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, addDays, addWeeks, addMonths, subDays, subWeeks, subMonths, isSameDay } from 'date-fns';
@@ -17,6 +18,7 @@ const STATUT_BADGES: Record<string, { label: string, className: string }> = {
 };
 
 export default function Appointments() {
+  const { appUser } = useAuth();
   const [appointments, setAppointments] = useState<any[]>([]);
   const [consultations, setConsultations] = useState<any[]>([]);
   const [patients, setPatients] = useState<Record<string, any>>({});
@@ -24,6 +26,7 @@ export default function Appointments() {
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>('day');
+  const [sendingToQueue, setSendingToQueue] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubPatients = onSnapshot(collection(db, 'patients'), (snapshot) => {
@@ -81,7 +84,7 @@ export default function Appointments() {
     const unsubscribeAppts = onSnapshot(qAppts, (snapshot) => {
       setAppointments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
-    
+
     const unsubscribeConsults = onSnapshot(qConsults, (snapshot) => {
       setConsultations(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
@@ -98,6 +101,7 @@ export default function Appointments() {
       case 'annulé': return 'bg-red-100 text-red-800';
       case 'réalisé': return 'bg-slate-100 text-slate-800';
       case 'absent': return 'bg-orange-100 text-orange-800';
+      case 'en_salle': return 'bg-indigo-100 text-indigo-800';
       default: return 'bg-blue-100 text-blue-800';
     }
   };
@@ -130,6 +134,66 @@ export default function Appointments() {
     return format(selectedDate, 'MMMM yyyy', { locale: fr });
   };
 
+  // Envoyer un RDV en salle d'attente
+  const handleSendToQueue = async (apt: any, e: React.MouseEvent) => {
+    e.stopPropagation(); // Ne pas ouvrir le formulaire d'édition
+    if (sendingToQueue) return;
+    setSendingToQueue(apt.id);
+    try {
+      // Vérifier qu'il n'est pas déjà dans la file
+      const checkQuery = query(
+        collection(db, 'file_attente'),
+        where('appointment_id', '==', apt.id),
+        where('date', '==', apt.date_rdv)
+      );
+      const checkSnap = await getDocs(checkQuery);
+      if (!checkSnap.empty) {
+        alert('Ce rendez-vous est déjà dans la file d\'attente.');
+        setSendingToQueue(null);
+        return;
+      }
+
+      // Trouver le prochain numéro d'ordre
+      const todayQuery = query(
+        collection(db, 'file_attente'),
+        where('date', '==', apt.date_rdv)
+      );
+      const todaySnap = await getDocs(todayQuery);
+      const maxOrdre = todaySnap.empty ? 0 : Math.max(...todaySnap.docs.map(d => d.data().numero_ordre || 0));
+
+      const now = new Date();
+      await addDoc(collection(db, 'file_attente'), {
+        patient_id: apt.patient_id,
+        appointment_id: apt.id,
+        date: apt.date_rdv,
+        numero_ordre: maxOrdre + 1,
+        heure_arrivee: format(now, 'HH:mm'),
+        statut: 'en_attente',
+        priorite: 'normale',
+        motif: apt.motif || '',
+        created_by: appUser?.uid || '',
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      });
+
+      // Mettre à jour le statut du RDV
+      await updateDoc(doc(db, 'appointments', apt.id), {
+        statut: 'en_salle',
+        updated_at: now.toISOString(),
+      });
+    } catch (err) {
+      console.error('Erreur envoi en salle:', err);
+      alert('Erreur lors de l\'envoi en salle d\'attente.');
+    } finally {
+      setSendingToQueue(null);
+    }
+  };
+
+  // Vérifier si un RDV peut être envoyé en salle
+  const canSendToQueue = (apt: any): boolean => {
+    return ['planifie', 'planifié', 'confirmé', 'confirme'].includes(apt.statut);
+  };
+
   // Group appointments by date for week/month views
   const groupedAppointments = appointments.reduce((acc, apt) => {
     const date = apt.date_rdv;
@@ -137,6 +201,69 @@ export default function Appointments() {
     acc[date].push(apt);
     return acc;
   }, {} as Record<string, any[]>);
+
+  // Composant de rendu d'un RDV (réutilisé en vue jour et semaine/mois)
+  const renderAppointmentRow = (apt: any, compact: boolean = false) => {
+    const patient = patients[apt.patient_id];
+    const consultation = consultations.find(c => c.patient_id === apt.patient_id && c.date_consultation === apt.date_rdv);
+    const statusInfo = consultation ? STATUT_BADGES[consultation.statutConsultation || 'pre_consultation'] : null;
+    const showSendButton = canSendToQueue(apt);
+    const isSending = sendingToQueue === apt.id;
+
+    return (
+      <div className={`${compact ? 'px-4 py-3 sm:px-6' : 'px-4 py-4 sm:px-6'} flex items-center justify-between`}>
+        <div className="flex items-center">
+          <div className={`flex-shrink-0 mr-4 text-center ${compact ? 'w-16' : ''}`}>
+            <span className={`${compact ? 'text-md' : 'text-lg'} font-bold text-indigo-600`}>{apt.heure_rdv}</span>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-slate-900 flex items-center">
+              <User className="mr-1 h-4 w-4 text-slate-400" />
+              {patient ? `${patient.nom} ${patient.prenom}` : 'Patient inconnu'}
+              {patient?.statutPatient === 'patient_habituel' ? (
+                <span className="ml-3 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                  Habituel
+                </span>
+              ) : patient?.statutPatient === 'nouveau_patient' ? (
+                <span className="ml-3 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+                  Nouveau
+                </span>
+              ) : null}
+              {statusInfo && (
+                <span className={`ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusInfo.className}`}>
+                  {statusInfo.label}
+                </span>
+              )}
+            </p>
+            <p className={`${compact ? 'text-xs' : 'text-sm'} text-slate-500 mt-${compact ? '0.5' : '1'}`}>
+              {apt.motif || 'Aucun motif précisé'}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center space-x-3">
+          {showSendButton && (
+            <button
+              onClick={(e) => handleSendToQueue(apt, e)}
+              disabled={isSending}
+              className="inline-flex items-center px-2.5 py-1.5 rounded-md text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+              title="Envoyer en salle d'attente"
+            >
+              <LogIn className="h-3.5 w-3.5 mr-1" />
+              {isSending ? '...' : 'Salle d\'attente'}
+            </button>
+          )}
+          {apt.statut === 'en_salle' && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">
+              En salle
+            </span>
+          )}
+          <span className={clsx("inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize", getStatusColor(apt.statut))}>
+            {apt.statut}
+          </span>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -172,7 +299,7 @@ export default function Appointments() {
               Mois
             </button>
           </div>
-          <button 
+          <button
             onClick={() => {
               setSelectedAppointment(null);
               setIsFormOpen(true);
@@ -210,55 +337,18 @@ export default function Appointments() {
         <div className="flex-1 p-0 overflow-y-auto max-h-[600px]">
           {viewMode === 'day' ? (
             <ul className="divide-y divide-slate-200">
-              {appointments.map((apt) => {
-                const patient = patients[apt.patient_id];
-                const consultation = consultations.find(c => c.patient_id === apt.patient_id && c.date_consultation === apt.date_rdv);
-                const statusInfo = consultation ? STATUT_BADGES[consultation.statutConsultation || 'pre_consultation'] : null;
-                return (
-                  <li 
-                    key={apt.id} 
-                    className="hover:bg-slate-50 transition-colors cursor-pointer"
-                    onClick={() => {
-                      setSelectedAppointment(apt);
-                      setIsFormOpen(true);
-                    }}
-                  >
-                    <div className="px-4 py-4 sm:px-6 flex items-center justify-between">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0 mr-4 text-center">
-                          <span className="text-lg font-bold text-indigo-600">{apt.heure_rdv}</span>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-slate-900 flex items-center">
-                            <User className="mr-1 h-4 w-4 text-slate-400" />
-                            {patient ? `${patient.nom} ${patient.prenom}` : 'Patient inconnu'}
-                            {patient?.statutPatient === 'patient_habituel' ? (
-                              <span className="ml-3 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                                Habituel
-                              </span>
-                            ) : patient?.statutPatient === 'nouveau_patient' ? (
-                              <span className="ml-3 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200">
-                                Nouveau
-                              </span>
-                            ) : null}
-                            {statusInfo && (
-                              <span className={`ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusInfo.className}`}>
-                                {statusInfo.label}
-                              </span>
-                            )}
-                          </p>
-                          <p className="text-sm text-slate-500 mt-1">{apt.motif || 'Aucun motif précisé'}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-4">
-                        <span className={clsx("inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize", getStatusColor(apt.statut))}>
-                          {apt.statut}
-                        </span>
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
+              {appointments.map((apt) => (
+                <li
+                  key={apt.id}
+                  className="hover:bg-slate-50 transition-colors cursor-pointer"
+                  onClick={() => {
+                    setSelectedAppointment(apt);
+                    setIsFormOpen(true);
+                  }}
+                >
+                  {renderAppointmentRow(apt)}
+                </li>
+              ))}
               {appointments.length === 0 && (
                 <li className="px-4 py-12 text-center text-sm text-slate-500">
                   Aucun rendez-vous prévu pour cette date.
@@ -273,55 +363,18 @@ export default function Appointments() {
                     {format(new Date(dateStr), 'EEEE d MMMM yyyy', { locale: fr })}
                   </div>
                   <ul className="divide-y divide-slate-100">
-                    {groupedAppointments[dateStr].map((apt) => {
-                      const patient = patients[apt.patient_id];
-                      const consultation = consultations.find(c => c.patient_id === apt.patient_id && c.date_consultation === apt.date_rdv);
-                      const statusInfo = consultation ? STATUT_BADGES[consultation.statutConsultation || 'pre_consultation'] : null;
-                      return (
-                        <li 
-                          key={apt.id} 
-                          className="hover:bg-slate-50 transition-colors pl-8 cursor-pointer"
-                          onClick={() => {
-                            setSelectedAppointment(apt);
-                            setIsFormOpen(true);
-                          }}
-                        >
-                          <div className="px-4 py-3 sm:px-6 flex items-center justify-between">
-                            <div className="flex items-center">
-                              <div className="flex-shrink-0 mr-4 text-center w-16">
-                                <span className="text-md font-bold text-indigo-600">{apt.heure_rdv}</span>
-                              </div>
-                              <div>
-                                <p className="text-sm font-medium text-slate-900 flex items-center">
-                                  <User className="mr-1 h-4 w-4 text-slate-400" />
-                                  {patient ? `${patient.nom} ${patient.prenom}` : 'Patient inconnu'}
-                                  {patient?.statutPatient === 'patient_habituel' ? (
-                                    <span className="ml-3 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                                      Habituel
-                                    </span>
-                                  ) : patient?.statutPatient === 'nouveau_patient' ? (
-                                    <span className="ml-3 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200">
-                                      Nouveau
-                                    </span>
-                                  ) : null}
-                                  {statusInfo && (
-                                    <span className={`ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusInfo.className}`}>
-                                      {statusInfo.label}
-                                    </span>
-                                  )}
-                                </p>
-                                <p className="text-xs text-slate-500 mt-0.5">{apt.motif || 'Aucun motif précisé'}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center space-x-4">
-                              <span className={clsx("inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize", getStatusColor(apt.statut))}>
-                                {apt.statut}
-                              </span>
-                            </div>
-                          </div>
-                        </li>
-                      );
-                    })}
+                    {groupedAppointments[dateStr].map((apt) => (
+                      <li
+                        key={apt.id}
+                        className="hover:bg-slate-50 transition-colors pl-8 cursor-pointer"
+                        onClick={() => {
+                          setSelectedAppointment(apt);
+                          setIsFormOpen(true);
+                        }}
+                      >
+                        {renderAppointmentRow(apt, true)}
+                      </li>
+                    ))}
                   </ul>
                 </div>
               ))}

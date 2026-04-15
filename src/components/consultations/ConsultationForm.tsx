@@ -1,52 +1,106 @@
-import React, { useState, useEffect } from 'react';
-import { collection, addDoc, updateDoc, doc, query, onSnapshot, orderBy } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, addDoc, updateDoc, doc, query, onSnapshot, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSettings } from '../../hooks/useSettings';
 import { X, Sparkles } from 'lucide-react';
 import { aiService } from '../../services/aiService';
+import type { ChampPreConsultation } from '../../types';
 
 interface ConsultationFormProps {
   consultation?: any;
   patientId?: string;
+  fileAttenteId?: string;
+  motif?: string;
   onClose: () => void;
 }
 
-export default function ConsultationForm({ consultation, patientId, onClose }: ConsultationFormProps) {
+export default function ConsultationForm({ consultation, patientId, fileAttenteId, motif: motifFromQueue, onClose }: ConsultationFormProps) {
   const { appUser } = useAuth();
+  const { settings } = useSettings();
   const [loading, setLoading] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [patients, setPatients] = useState<any[]>([]);
   const [notesBrutes, setNotesBrutes] = useState('');
-  
-  const [formData, setFormData] = useState({
-    patient_id: consultation?.patient_id || patientId || '',
-    date_consultation: consultation?.date_consultation || new Date().toISOString().split('T')[0],
-    poids: consultation?.poids || '',
-    tension: consultation?.tension || '',
-    allergies: consultation?.allergies || '',
-    commentaire_assistante: consultation?.commentaire_assistante || '',
-    statutConsultation: consultation?.statutConsultation || 'pre_consultation',
-    motif: consultation?.motif || '',
-    symptomes: consultation?.symptomes || '',
-    examen_clinique: consultation?.examen_clinique || '',
-    diagnostic_principal: consultation?.diagnostic_principal || '',
-    conduite_a_tenir: consultation?.conduite_a_tenir || '',
-    synthese: consultation?.synthese || '',
-    prescription: consultation?.prescription || '',
-    observations: consultation?.observations || '',
-    notes: consultation?.notes || '',
-  });
+
+  // Champs pré-consultation dynamiques depuis Settings
+  const champsPreConsult = useMemo(() => {
+    if (settings?.champs_pre_consultation && Array.isArray(settings.champs_pre_consultation)) {
+      return [...settings.champs_pre_consultation]
+        .filter((c: ChampPreConsultation) => c.actif)
+        .sort((a: ChampPreConsultation, b: ChampPreConsultation) => a.ordre - b.ordre);
+    }
+    return [
+      { id: 'poids', label: 'Poids', type: 'number' as const, unite: 'kg', actif: true, ordre: 1 },
+      { id: 'tension_systolique', label: 'Tension systolique', type: 'number' as const, unite: 'mmHg', actif: true, ordre: 2 },
+      { id: 'tension_diastolique', label: 'Tension diastolique', type: 'number' as const, unite: 'mmHg', actif: true, ordre: 3 },
+    ];
+  }, [settings]);
+
+  // Initialisation du formData avec rétro-compatibilité poids/tension
+  const buildInitialFormData = () => {
+    const base: Record<string, any> = {
+      patient_id: consultation?.patient_id || patientId || '',
+      date_consultation: consultation?.date_consultation || new Date().toISOString().split('T')[0],
+      poids: consultation?.poids || '',
+      tension: consultation?.tension || '',
+      allergies: consultation?.allergies || '',
+      commentaire_assistante: consultation?.commentaire_assistante || '',
+      statutConsultation: consultation?.statutConsultation || 'pre_consultation',
+      motif: consultation?.motif || motifFromQueue || '',
+      symptomes: consultation?.symptomes || '',
+      examen_clinique: consultation?.examen_clinique || '',
+      diagnostic_principal: consultation?.diagnostic_principal || '',
+      conduite_a_tenir: consultation?.conduite_a_tenir || '',
+      synthese: consultation?.synthese || '',
+      prescription: consultation?.prescription || '',
+      observations: consultation?.observations || '',
+      notes: consultation?.notes || '',
+      file_attente_id: consultation?.file_attente_id || fileAttenteId || '',
+    };
+
+    // Initialiser les champs dynamiques
+    champsPreConsult.forEach((champ) => {
+      const key = `pre_${champ.id}`;
+      if (consultation?.pre_consultation_data?.[champ.id] !== undefined) {
+        base[key] = consultation.pre_consultation_data[champ.id];
+      } else if (consultation?.[key] !== undefined) {
+        base[key] = consultation[key];
+      } else {
+        base[key] = '';
+      }
+    });
+
+    // Rétro-compat : ancien champ poids → pre_poids
+    if (!base['pre_poids'] && consultation?.poids) {
+      base['pre_poids'] = consultation.poids;
+    }
+    // Rétro-compat : ancien champ tension "12/8" → pre_tension_systolique / pre_tension_diastolique
+    if (!base['pre_tension_systolique'] && consultation?.tension) {
+      const parts = String(consultation.tension).split('/');
+      if (parts.length === 2) {
+        base['pre_tension_systolique'] = parts[0].trim();
+        base['pre_tension_diastolique'] = parts[1].trim();
+      }
+    }
+
+    return base;
+  };
+
+  const [formData, setFormData] = useState<Record<string, any>>(buildInitialFormData);
 
   useEffect(() => {
     const q = query(collection(db, 'patients'), orderBy('nom'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const pts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      const pts = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as any))
+        .filter((p: any) => !p.deleted && !p.supprime);
       setPatients(pts);
-      
+
       // If creating a new consultation and patient is selected, pre-fill allergies
       if (!consultation?.id && (consultation?.patient_id || patientId)) {
         const pId = consultation?.patient_id || patientId;
-        const p = pts.find(pt => pt.id === pId);
+        const p = pts.find((pt: any) => pt.id === pId);
         if (p && !formData.allergies) {
           setFormData(prev => ({ ...prev, allergies: p.allergies || '' }));
         }
@@ -57,6 +111,16 @@ export default function ConsultationForm({ consultation, patientId, onClose }: C
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handlePatientChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedId = e.target.value;
+    const patient = patients.find((p: any) => p.id === selectedId);
+    setFormData(prev => ({
+      ...prev,
+      patient_id: selectedId,
+      allergies: patient?.allergies || prev.allergies || '',
+    }));
   };
 
   const handleAiStructure = async () => {
@@ -77,49 +141,116 @@ export default function ConsultationForm({ consultation, patientId, onClose }: C
     }
   };
 
+  // Construire l'objet pre_consultation_data depuis les champs dynamiques
+  const buildPreConsultationData = (): Record<string, any> => {
+    const data: Record<string, any> = {};
+    champsPreConsult.forEach((champ) => {
+      const val = formData[`pre_${champ.id}`];
+      if (val !== undefined && val !== '') {
+        data[champ.id] = champ.type === 'number' ? parseFloat(val) || 0 : val;
+      }
+    });
+    return data;
+  };
+
+  // Extraire poids et tension depuis les champs dynamiques pour rétro-compat
+  const extractLegacyFields = () => {
+    const preData = buildPreConsultationData();
+    const legacy: Record<string, any> = {};
+    if (preData.poids !== undefined) legacy.poids = preData.poids;
+    const sys = preData.tension_systolique;
+    const dia = preData.tension_diastolique;
+    if (sys && dia) legacy.tension = `${sys}/${dia}`;
+    else if (sys) legacy.tension = String(sys);
+    return legacy;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      let dataToSave: any = { ...formData };
-      
+      const now = new Date().toISOString();
+      const preConsultData = buildPreConsultationData();
+      const legacyFields = extractLegacyFields();
+
+      let dataToSave: any;
+
       if (appUser?.role === 'assistante') {
         dataToSave = {
           patient_id: formData.patient_id,
           date_consultation: formData.date_consultation,
-          poids: formData.poids,
-          tension: formData.tension,
+          poids: legacyFields.poids ?? formData.poids,
+          tension: legacyFields.tension ?? formData.tension,
           allergies: formData.allergies,
           commentaire_assistante: formData.commentaire_assistante,
           statutConsultation: formData.statutConsultation,
+          motif: formData.motif,
+          pre_consultation_data: preConsultData,
         };
+      } else {
+        dataToSave = {
+          ...formData,
+          pre_consultation_data: preConsultData,
+          poids: legacyFields.poids ?? formData.poids,
+          tension: legacyFields.tension ?? formData.tension,
+        };
+        // Nettoyer les champs pre_ temporaires du save
+        Object.keys(dataToSave).forEach(key => {
+          if (key.startsWith('pre_')) delete dataToSave[key];
+        });
       }
+
+      // File attente ID
+      const faId = formData.file_attente_id || fileAttenteId;
+      if (faId) {
+        dataToSave.file_attente_id = faId;
+      }
+
+      let consultationDocId: string;
 
       // Update consultation document
       if (consultation?.id) {
+        consultationDocId = consultation.id;
         await updateDoc(doc(db, 'consultations', consultation.id), {
           ...dataToSave,
-          updated_at: new Date().toISOString(),
+          updated_at: now,
           updated_by: appUser?.uid
         });
       } else {
-        await addDoc(collection(db, 'consultations'), {
+        const docRef = await addDoc(collection(db, 'consultations'), {
           ...dataToSave,
           created_by: appUser?.uid || 'unknown',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          updated_by: appUser?.uid
+          created_at: now,
+          updated_at: now,
+          updated_by: appUser?.uid,
+          ...(appUser?.role !== 'assistante' ? { medecin_id: appUser?.uid } : {}),
         });
+        consultationDocId = docRef.id;
       }
 
       // Update patient document with latest allergies and poids
       if (formData.patient_id) {
-        const patientRef = doc(db, 'patients', formData.patient_id);
-        await updateDoc(patientRef, {
-          allergies: formData.allergies,
-          poids: formData.poids,
-          updated_at: new Date().toISOString()
-        });
+        try {
+          const patientUpdate: Record<string, any> = { updated_at: now };
+          if (formData.allergies) patientUpdate.allergies = formData.allergies;
+          if (legacyFields.poids) patientUpdate.poids = legacyFields.poids;
+          await updateDoc(doc(db, 'patients', formData.patient_id), patientUpdate);
+        } catch (err) {
+          console.warn('Impossible de mettre à jour le patient:', err);
+        }
+      }
+
+      // Liaison file_attente
+      if (faId) {
+        try {
+          await updateDoc(doc(db, 'file_attente', faId), {
+            consultation_id: consultationDocId,
+            statut: consultation?.id ? undefined : 'en_consultation',
+            updated_at: now,
+          });
+        } catch (err) {
+          console.warn('Impossible de mettre à jour la file d\'attente:', err);
+        }
       }
 
       onClose();
@@ -135,16 +266,23 @@ export default function ConsultationForm({ consultation, patientId, onClose }: C
     <div className="fixed inset-0 bg-slate-900/50 z-50 overflow-y-auto flex justify-center items-start p-4 sm:p-6">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl my-8 relative">
         <div className="flex justify-between items-center p-6 border-b border-slate-200 sticky top-0 bg-white z-10 rounded-t-xl">
-          <h2 className="text-xl font-semibold text-slate-900">
-            {consultation ? 'Modifier la consultation' : 'Nouvelle consultation'}
-          </h2>
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">
+              {consultation ? 'Modifier la consultation' : 'Nouvelle consultation'}
+            </h2>
+            {formData.file_attente_id && (
+              <p className="text-xs text-indigo-500 mt-0.5">
+                Liée à la file d'attente
+              </p>
+            )}
+          </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-500">
             <X className="h-6 w-6" />
           </button>
         </div>
-        
+
         <div className={`p-6 grid grid-cols-1 ${appUser?.role !== 'assistante' ? 'lg:grid-cols-3' : ''} gap-6`}>
-          
+
           {/* AI Assistant Sidebar (Hidden for assistante) */}
           {appUser?.role !== 'assistante' && (
             <div className="lg:col-span-1 border-r border-slate-200 pr-6 space-y-4">
@@ -180,7 +318,14 @@ export default function ConsultationForm({ consultation, patientId, onClose }: C
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700">Patient *</label>
-                <select required name="patient_id" value={formData.patient_id} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2">
+                <select
+                  required
+                  name="patient_id"
+                  value={formData.patient_id}
+                  onChange={handlePatientChange}
+                  disabled={!!patientId || !!consultation}
+                  className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 disabled:bg-slate-100"
+                >
                   <option value="">Sélectionner un patient</option>
                   {patients.map(p => (
                     <option key={p.id} value={p.id}>{p.nom} {p.prenom}</option>
@@ -202,24 +347,45 @@ export default function ConsultationForm({ consultation, patientId, onClose }: C
               </div>
             </div>
 
-            {/* Pre-consultation fields (Visible to all) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200">
-              <div className="md:col-span-2">
-                <h4 className="text-sm font-semibold text-slate-900 mb-2">Pré-consultation (Assistante)</h4>
+            {/* Pre-consultation fields — DYNAMIQUES depuis Settings */}
+            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+              <h4 className="text-sm font-semibold text-slate-900 mb-2">Pré-consultation (Assistante)</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {champsPreConsult.map((champ) => (
+                  <div key={champ.id}>
+                    <label className="block text-sm font-medium text-slate-700">
+                      {champ.label} {champ.unite && <span className="text-slate-400">({champ.unite})</span>}
+                    </label>
+                    {champ.type === 'text' ? (
+                      <input
+                        type="text"
+                        name={`pre_${champ.id}`}
+                        value={formData[`pre_${champ.id}`] || ''}
+                        onChange={handleChange}
+                        className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
+                      />
+                    ) : (
+                      <input
+                        type="number"
+                        step="any"
+                        name={`pre_${champ.id}`}
+                        value={formData[`pre_${champ.id}`] || ''}
+                        onChange={handleChange}
+                        className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
+                      />
+                    )}
+                  </div>
+                ))}
               </div>
+
+              {/* Allergies — toujours affiché */}
               <div>
-                <label className="block text-sm font-medium text-slate-700">Poids (kg)</label>
-                <input type="number" step="0.1" name="poids" value={formData.poids} onChange={handleChange} placeholder="Ex: 75.5" className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700">Tension artérielle</label>
-                <input type="text" name="tension" value={formData.tension} onChange={handleChange} placeholder="Ex: 12/8" className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white" />
-              </div>
-              <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-slate-700">Allergies</label>
                 <input type="text" name="allergies" value={formData.allergies} onChange={handleChange} placeholder="Ex: Pénicilline, Arachides..." className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white" />
               </div>
-              <div className="md:col-span-2">
+
+              {/* Commentaire assistante */}
+              <div>
                 <label className="block text-sm font-medium text-slate-700">Observations Pré-consultation</label>
                 <textarea name="commentaire_assistante" rows={2} value={formData.commentaire_assistante} onChange={handleChange} placeholder="Ex: Patient à jeun, anxieux..." className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white" />
               </div>

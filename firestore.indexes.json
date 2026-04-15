@@ -1,4 +1,89 @@
 {
-    "indexes": [],
+    "indexes": [
+        {
+            "collectionGroup": "exams",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "patient_id",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "date_examen",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "consultations",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "patient_id",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "date_consultation",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "payments",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "patient_id",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "date_paiement",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "appointments",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "date_rdv",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "heure_rdv",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "file_attente",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "date",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "numero_ordre",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "consultations",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "patient_id",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "date_consultation",
+                    "order": "ASCENDING"
+                }
+            ]
+        }
+    ],
     "fieldOverrides": []
 }

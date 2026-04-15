@@ -1,18 +1,24 @@
 import React, { useState } from 'react';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, addDoc, collection } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { X, CheckSquare, Square } from 'lucide-react';
+import { useSettings } from '../../hooks/useSettings';
+import { X, CheckSquare, Square, CreditCard } from 'lucide-react';
 
 interface PostConsultationModalProps {
     entryId: string;
     patientName: string;
     appointmentId?: string;
+    patientId: string;
+    consultationId?: string;
     onClose: () => void;
 }
 
-export default function PostConsultationModal({ entryId, patientName, appointmentId, onClose }: PostConsultationModalProps) {
+export default function PostConsultationModal({
+    entryId, patientName, appointmentId, patientId, consultationId, onClose
+}: PostConsultationModalProps) {
     const { appUser } = useAuth();
+    const { settings } = useSettings();
     const [saving, setSaving] = useState(false);
     const [checks, setChecks] = useState({
         ordonnance_imprimee: false,
@@ -22,31 +28,65 @@ export default function PostConsultationModal({ entryId, patientName, appointmen
         paiement_effectue: false,
     });
     const [notes, setNotes] = useState('');
+    const [montant, setMontant] = useState(String(settings.tarif_consultation || ''));
+    const [modePaiement, setModePaiement] = useState('especes');
 
     const toggle = (key: keyof typeof checks) => {
-        setChecks(prev => ({ ...prev, [key]: !prev[key] }));
+        setChecks((prev) => ({ ...prev, [key]: !prev[key] }));
     };
 
     const handleSave = async () => {
         setSaving(true);
         try {
-            const now = new Date().toISOString();
+            const now = new Date();
+            const nowISO = now.toISOString();
+
+            // 1. Mettre à jour file_attente
             await updateDoc(doc(db, 'file_attente', entryId), {
                 statut: 'termine',
+                heure_sortie: nowISO,
+                heure_fin_consultation: nowISO,
                 post_consultation: {
                     ...checks,
                     notes,
                     effectuee_par: appUser?.uid,
-                    effectuee_at: now,
+                    effectuee_at: nowISO,
                 },
-                updated_at: now,
+                updated_at: nowISO,
             });
+
+            // 2. Mettre à jour le RDV
             if (appointmentId) {
                 await updateDoc(doc(db, 'appointments', appointmentId), {
                     statut: 'réalisé',
-                    updated_at: now,
+                    updated_at: nowISO,
                 });
             }
+
+            // 3. Mettre à jour la consultation
+            if (consultationId) {
+                await updateDoc(doc(db, 'consultations', consultationId), {
+                    statutConsultation: 'terminee',
+                    updated_at: nowISO,
+                });
+            }
+
+            // 4. Créer le paiement si coché
+            if (checks.paiement_effectue && montant && Number(montant) > 0) {
+                await addDoc(collection(db, 'payments'), {
+                    patient_id: patientId,
+                    consultation_id: consultationId || null,
+                    montant: Number(montant),
+                    mode_paiement: modePaiement,
+                    statut_paiement: 'payé',
+                    date_paiement: now.toISOString().split('T')[0],
+                    notes: `Paiement consultation — ${patientName}`,
+                    created_by: appUser?.uid || '',
+                    created_at: nowISO,
+                    updated_at: nowISO,
+                });
+            }
+
             onClose();
         } catch (err) {
             console.error('Erreur post-consultation:', err);
@@ -92,6 +132,39 @@ export default function PostConsultationModal({ entryId, patientName, appointmen
                         </button>
                     ))}
                 </div>
+
+                {/* Section paiement conditionnelle */}
+                {checks.paiement_effectue && (
+                    <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg space-y-3">
+                        <h4 className="text-sm font-medium text-green-900 flex items-center">
+                            <CreditCard className="h-4 w-4 mr-2" />Détails du paiement
+                        </h4>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-medium text-slate-600 mb-1">Montant (MAD)</label>
+                                <input
+                                    type="number"
+                                    value={montant}
+                                    onChange={(e) => setMontant(e.target.value)}
+                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-600 mb-1">Mode</label>
+                                <select
+                                    value={modePaiement}
+                                    onChange={(e) => setModePaiement(e.target.value)}
+                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                >
+                                    <option value="especes">Espèces</option>
+                                    <option value="carte">Carte bancaire</option>
+                                    <option value="cheque">Chèque</option>
+                                    <option value="virement">Virement</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 <div className="mb-4">
                     <label className="block text-sm font-medium text-slate-700 mb-1">Notes (optionnel)</label>

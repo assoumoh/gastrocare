@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import { User, Calendar, FileText, Pill, CreditCard, Activity, Sparkles, Edit, Printer, AlertTriangle } from 'lucide-react';
+import { User, Calendar, FileText, Pill, CreditCard, Activity, Sparkles, Edit, AlertTriangle } from 'lucide-react';
 import clsx from 'clsx';
 import PatientForm from '../components/patients/PatientForm';
 import PatientExams from '../components/patients/PatientExams';
@@ -13,7 +13,7 @@ import PatientFinance from '../components/patients/PatientFinance';
 import ConsultationForm from '../components/consultations/ConsultationForm';
 import { useAuth } from '../contexts/AuthContext';
 
-const tabs = [
+const allTabs = [
   { name: 'Informations', id: 'info', icon: User },
   { name: 'Consultations', id: 'consultations', icon: Activity },
   { name: 'Examens', id: 'exams', icon: FileText },
@@ -22,31 +22,58 @@ const tabs = [
   { name: 'Paiement', id: 'finance', icon: CreditCard },
 ];
 
+const assistanteTabs = [
+  { name: 'Informations', id: 'info', icon: User },
+  { name: 'Paiement', id: 'finance', icon: CreditCard },
+];
+
 export default function PatientDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [patient, setPatient] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState('info');
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'info');
   const [loading, setLoading] = useState(true);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isConsultationFormOpen, setIsConsultationFormOpen] = useState(false);
   const { appUser } = useAuth();
 
+  const isAssistante = appUser?.role === 'assistante';
+  const tabs = isAssistante ? assistanteTabs : allTabs;
+
+  // Sync tab from URL search params
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam && tabs.some((t) => t.id === tabParam)) {
+      setActiveTab(tabParam);
+    }
+  }, [searchParams, tabs]);
+
   useEffect(() => {
     if (!id) return;
-    const unsubscribe = onSnapshot(doc(db, 'patients', id), (doc) => {
-      if (doc.exists()) {
-        setPatient({ id: doc.id, ...doc.data() });
+    const unsubscribe = onSnapshot(doc(db, 'patients', id), (docSnap) => {
+      if (docSnap.exists()) {
+        setPatient({ id: docSnap.id, ...docSnap.data() });
       } else {
         setPatient(null);
       }
+      setLoading(false);
+    }, (error) => {
+      console.error('Erreur chargement patient:', error);
       setLoading(false);
     });
     return () => unsubscribe();
   }, [id]);
 
-  if (loading) return <div>Chargement...</div>;
-  if (!patient) return <div>Patient introuvable</div>;
+  if (loading) return <div className="flex items-center justify-center h-64 text-slate-500">Chargement...</div>;
+  if (!patient) return (
+    <div className="flex flex-col items-center justify-center h-64 space-y-4">
+      <p className="text-slate-500">Patient introuvable</p>
+      <button onClick={() => navigate('/patients')} className="text-indigo-600 hover:text-indigo-700 font-medium text-sm">
+        Retour à la liste des patients
+      </button>
+    </div>
+  );
 
   const isDeleted = patient.deleted === true;
 
@@ -55,22 +82,13 @@ export default function PatientDetail() {
       {isDeleted && (
         <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded-md">
           <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <AlertTriangle className="h-5 w-5 text-red-400" aria-hidden="true" />
-            </div>
-            <div className="ml-3">
-              <p className="text-sm text-red-700 font-medium">
-                Ce patient a été supprimé. Ses données sont conservées pour l'historique mais il n'est plus possible de les modifier ou d'ajouter de nouvelles consultations.
-              </p>
-            </div>
-            <div className="ml-auto pl-3">
-              <button
-                onClick={() => navigate('/patients')}
-                className="text-sm font-medium text-red-700 hover:text-red-600"
-              >
-                Retour à la liste
-              </button>
-            </div>
+            <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0" />
+            <p className="ml-3 text-sm text-red-700 font-medium">
+              Ce patient a été supprimé. Ses données sont conservées pour l'historique.
+            </p>
+            <button onClick={() => navigate('/patients')} className="ml-auto text-sm font-medium text-red-700 hover:text-red-600">
+              Retour à la liste
+            </button>
           </div>
         </div>
       )}
@@ -81,13 +99,9 @@ export default function PatientDetail() {
             <h3 className="text-lg leading-6 font-medium text-slate-900 flex items-center">
               {patient.nom} {patient.prenom}
               {patient.statutPatient === 'patient_habituel' ? (
-                <span className="ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                  Patient habituel
-                </span>
+                <span className="ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">Patient habituel</span>
               ) : (
-                <span className="ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                  Nouveau patient
-                </span>
+                <span className="ml-3 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Nouveau patient</span>
               )}
               {!isDeleted && (
                 <button onClick={() => setIsEditOpen(true)} className="ml-3 text-slate-400 hover:text-indigo-600">
@@ -96,21 +110,20 @@ export default function PatientDetail() {
               )}
             </h3>
             <p className="mt-1 max-w-2xl text-sm text-slate-500">
-              {patient.num_dossier && `Dossier: ${patient.num_dossier} • `}
+              {(patient.id_patient || patient.num_dossier) && `ID: ${patient.id_patient || patient.num_dossier} • `}
               {patient.telephone} • {patient.sexe} • {patient.date_naissance}
             </p>
           </div>
           <div className="flex space-x-3">
-            {appUser?.role !== 'assistante' && (
-              <button className="inline-flex items-center px-3 py-2 border border-slate-300 shadow-sm text-sm leading-4 font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                <Sparkles className="mr-2 h-4 w-4 text-indigo-500" />
-                Résumé IA
+            {!isAssistante && (
+              <button className="inline-flex items-center px-3 py-2 border border-slate-300 shadow-sm text-sm leading-4 font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50">
+                <Sparkles className="mr-2 h-4 w-4 text-indigo-500" />Résumé IA
               </button>
             )}
-            {!isDeleted && (
-              <button 
+            {!isDeleted && !isAssistante && (
+              <button
                 onClick={() => setIsConsultationFormOpen(true)}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700"
               >
                 Nouvelle Consultation
               </button>
@@ -121,7 +134,7 @@ export default function PatientDetail() {
           <nav className="-mb-px flex space-x-8 px-6" aria-label="Tabs">
             {tabs.map((tab) => (
               <button
-                key={tab.name}
+                key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={clsx(
                   activeTab === tab.id
@@ -135,7 +148,6 @@ export default function PatientDetail() {
                     activeTab === tab.id ? 'text-indigo-500' : 'text-slate-400 group-hover:text-slate-500',
                     '-ml-0.5 mr-2 h-5 w-5'
                   )}
-                  aria-hidden="true"
                 />
                 {tab.name}
               </button>
@@ -151,34 +163,13 @@ export default function PatientDetail() {
             <div>
               <h4 className="text-base font-medium text-slate-900 border-b pb-2 mb-4">Identité & Contact</h4>
               <dl className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-3">
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-500">Date de naissance</dt>
-                  <dd className="mt-1 text-sm text-slate-900">{patient.date_naissance || '-'}</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-500">Sexe</dt>
-                  <dd className="mt-1 text-sm text-slate-900">{patient.sexe || '-'}</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-500">CIN</dt>
-                  <dd className="mt-1 text-sm text-slate-900">{patient.cin || '-'}</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-500">Téléphone</dt>
-                  <dd className="mt-1 text-sm text-slate-900">{patient.telephone || '-'}</dd>
-                </div>
-                <div className="sm:col-span-2">
-                  <dt className="text-sm font-medium text-slate-500">Adresse</dt>
-                  <dd className="mt-1 text-sm text-slate-900">{patient.adresse || '-'}</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-500">Profession</dt>
-                  <dd className="mt-1 text-sm text-slate-900">{patient.profession || '-'}</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-500">Statut Familial</dt>
-                  <dd className="mt-1 text-sm text-slate-900">{patient.statut_familial || '-'}</dd>
-                </div>
+                <div><dt className="text-sm font-medium text-slate-500">Date de naissance</dt><dd className="mt-1 text-sm text-slate-900">{patient.date_naissance || '-'}</dd></div>
+                <div><dt className="text-sm font-medium text-slate-500">Sexe</dt><dd className="mt-1 text-sm text-slate-900">{patient.sexe || '-'}</dd></div>
+                <div><dt className="text-sm font-medium text-slate-500">CIN</dt><dd className="mt-1 text-sm text-slate-900">{patient.cin || '-'}</dd></div>
+                <div><dt className="text-sm font-medium text-slate-500">Téléphone</dt><dd className="mt-1 text-sm text-slate-900">{patient.telephone || '-'}</dd></div>
+                <div className="sm:col-span-2"><dt className="text-sm font-medium text-slate-500">Adresse</dt><dd className="mt-1 text-sm text-slate-900">{patient.adresse || '-'}</dd></div>
+                <div><dt className="text-sm font-medium text-slate-500">Profession</dt><dd className="mt-1 text-sm text-slate-900">{patient.profession || '-'}</dd></div>
+                <div><dt className="text-sm font-medium text-slate-500">Statut Familial</dt><dd className="mt-1 text-sm text-slate-900">{patient.statut_familial || '-'}</dd></div>
               </dl>
             </div>
 
@@ -186,125 +177,51 @@ export default function PatientDetail() {
             <div>
               <h4 className="text-base font-medium text-slate-900 border-b pb-2 mb-4">Informations Administratives</h4>
               <dl className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-3">
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-500">N° Dossier</dt>
-                  <dd className="mt-1 text-sm text-slate-900">{patient.num_dossier || '-'}</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-500">Mutuelle</dt>
-                  <dd className="mt-1 text-sm text-slate-900">{patient.mutuelle || '-'}</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-500">AMO</dt>
-                  <dd className="mt-1 text-sm text-slate-900">{patient.amo || '-'}</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-500">N° CNSS</dt>
-                  <dd className="mt-1 text-sm text-slate-900">{patient.num_cnss || '-'}</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-500">Origine Patient</dt>
-                  <dd className="mt-1 text-sm text-slate-900">
-                    {patient.origine_patient || '-'}
-                    {patient.detail_origine && ` (${patient.detail_origine})`}
-                  </dd>
-                </div>
+                <div><dt className="text-sm font-medium text-slate-500">ID Patient</dt><dd className="mt-1 text-sm text-slate-900">{patient.id_patient || patient.num_dossier || '-'}</dd></div>
+                <div><dt className="text-sm font-medium text-slate-500">Mutuelle</dt><dd className="mt-1 text-sm text-slate-900">{patient.mutuelle || '-'}</dd></div>
+                <div><dt className="text-sm font-medium text-slate-500">AMO</dt><dd className="mt-1 text-sm text-slate-900">{patient.amo || '-'}</dd></div>
+                <div><dt className="text-sm font-medium text-slate-500">N° CNSS</dt><dd className="mt-1 text-sm text-slate-900">{patient.num_cnss || '-'}</dd></div>
+                <div><dt className="text-sm font-medium text-slate-500">Origine Patient</dt><dd className="mt-1 text-sm text-slate-900">{patient.origine_patient || '-'}{patient.detail_origine && ` (${patient.detail_origine})`}</dd></div>
               </dl>
             </div>
 
             {/* Données Médicales */}
-            {appUser?.role !== 'assistante' && (
+            {!isAssistante && (
               <div>
                 <h4 className="text-base font-medium text-slate-900 border-b pb-2 mb-4">Données Médicales</h4>
                 <dl className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
-                  <div className="sm:col-span-1">
-                    <dt className="text-sm font-medium text-slate-500">Allergies</dt>
-                    <dd className="mt-1 text-sm text-slate-900 font-medium text-red-600">{patient.allergies || 'Aucune'}</dd>
-                  </div>
-                  <div className="sm:col-span-1">
-                    <dt className="text-sm font-medium text-slate-500">Poids (kg)</dt>
-                    <dd className="mt-1 text-sm text-slate-900">{patient.poids || '-'}</dd>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <dt className="text-sm font-medium text-slate-500">Antécédents Médicaux</dt>
-                    <dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.antecedents_medicaux || 'Aucun'}</dd>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <dt className="text-sm font-medium text-slate-500">Antécédents Digestifs</dt>
-                    <dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.antecedents_digestifs || 'Aucun'}</dd>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <dt className="text-sm font-medium text-slate-500">Antécédents Familiaux</dt>
-                    <dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.antecedents_familiaux || 'Aucun'}</dd>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <dt className="text-sm font-medium text-slate-500">Antécédents Chirurgicaux</dt>
-                    <dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.antecedents_chirurgicaux || 'Aucun'}</dd>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <dt className="text-sm font-medium text-slate-500">Habitudes Toxiques</dt>
-                    <dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.habitudes_toxiques || 'Aucune'}</dd>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <dt className="text-sm font-medium text-slate-500">Traitement en cours</dt>
-                    <dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.traitement_en_cours || patient.traitements_chroniques || 'Aucun'}</dd>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <dt className="text-sm font-medium text-slate-500">Observations Médecin</dt>
-                    <dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.observations_medecin || 'Aucune'}</dd>
-                  </div>
-                  <div className="sm:col-span-1">
-                    <dt className="text-sm font-medium text-slate-500">Suivi Long Terme</dt>
-                    <dd className="mt-1 text-sm text-slate-900">{patient.suivi_long_terme || 'Non'}</dd>
-                  </div>
+                  <div><dt className="text-sm font-medium text-slate-500">Allergies</dt><dd className="mt-1 text-sm text-red-600 font-medium">{patient.allergies || 'Aucune'}</dd></div>
+                  <div><dt className="text-sm font-medium text-slate-500">Poids (kg)</dt><dd className="mt-1 text-sm text-slate-900">{patient.poids || '-'}</dd></div>
+                  <div className="sm:col-span-2"><dt className="text-sm font-medium text-slate-500">Antécédents Médicaux</dt><dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.antecedents_medicaux || 'Aucun'}</dd></div>
+                  <div className="sm:col-span-2"><dt className="text-sm font-medium text-slate-500">Antécédents Personnels</dt><dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.antecedents_personnels || patient.antecedents_digestifs || 'Aucun'}</dd></div>
+                  <div className="sm:col-span-2"><dt className="text-sm font-medium text-slate-500">Antécédents Familiaux</dt><dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.antecedents_familiaux || 'Aucun'}</dd></div>
+                  <div className="sm:col-span-2"><dt className="text-sm font-medium text-slate-500">Antécédents Chirurgicaux</dt><dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.antecedents_chirurgicaux || 'Aucun'}</dd></div>
+                  <div className="sm:col-span-2"><dt className="text-sm font-medium text-slate-500">Habitudes Toxiques</dt><dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.habitudes_toxiques || 'Aucune'}</dd></div>
+                  <div className="sm:col-span-2"><dt className="text-sm font-medium text-slate-500">Traitement en cours</dt><dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.traitement_en_cours || patient.traitements_chroniques || 'Aucun'}</dd></div>
+                  <div className="sm:col-span-2"><dt className="text-sm font-medium text-slate-500">Observations Médecin</dt><dd className="mt-1 text-sm text-slate-900 whitespace-pre-wrap">{patient.observations_medecin || 'Aucune'}</dd></div>
+                  <div><dt className="text-sm font-medium text-slate-500">Suivi Long Terme</dt><dd className="mt-1 text-sm text-slate-900">{patient.suivi_long_terme || 'Non'}</dd></div>
                 </dl>
               </div>
             )}
-            
-            {/* Données Pré-consultation (Visible for assistante) */}
-            {appUser?.role === 'assistante' && (
+
+            {/* Pré-consultation visible pour assistante */}
+            {isAssistante && (
               <div>
                 <h4 className="text-base font-medium text-slate-900 border-b pb-2 mb-4">Données Pré-consultation</h4>
                 <dl className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
-                  <div className="sm:col-span-1">
-                    <dt className="text-sm font-medium text-slate-500">Allergies</dt>
-                    <dd className="mt-1 text-sm text-slate-900 font-medium text-red-600">{patient.allergies || 'Aucune'}</dd>
-                  </div>
-                  <div className="sm:col-span-1">
-                    <dt className="text-sm font-medium text-slate-500">Poids (kg)</dt>
-                    <dd className="mt-1 text-sm text-slate-900">{patient.poids || '-'}</dd>
-                  </div>
+                  <div><dt className="text-sm font-medium text-slate-500">Allergies</dt><dd className="mt-1 text-sm text-red-600 font-medium">{patient.allergies || 'Aucune'}</dd></div>
+                  <div><dt className="text-sm font-medium text-slate-500">Poids (kg)</dt><dd className="mt-1 text-sm text-slate-900">{patient.poids || '-'}</dd></div>
                 </dl>
               </div>
             )}
           </div>
         )}
-        
-        {activeTab === 'consultations' && (
-          <PatientConsultations patientId={patient.id} />
-        )}
 
-        {activeTab === 'exams' && (
-          <PatientExams patientId={patient.id} />
-        )}
-
-        {activeTab === 'prescriptions' && (
-          <PatientPrescriptions patientId={patient.id} />
-        )}
-
-        {activeTab === 'documents' && (
-          <PatientDocuments patientId={patient.id} />
-        )}
-
-        {activeTab === 'finance' && (
-          <PatientFinance patientId={patient.id} />
-        )}
-
-        {activeTab !== 'info' && activeTab !== 'consultations' && activeTab !== 'exams' && activeTab !== 'prescriptions' && activeTab !== 'documents' && activeTab !== 'finance' && (
-          <div className="text-center py-12 text-slate-500">
-            Contenu de l'onglet {tabs.find(t => t.id === activeTab)?.name} à implémenter.
-          </div>
-        )}
+        {activeTab === 'consultations' && <PatientConsultations patientId={patient.id} />}
+        {activeTab === 'exams' && <PatientExams patientId={patient.id} />}
+        {activeTab === 'prescriptions' && <PatientPrescriptions patientId={patient.id} />}
+        {activeTab === 'documents' && <PatientDocuments patientId={patient.id} />}
+        {activeTab === 'finance' && <PatientFinance patientId={patient.id} />}
       </div>
 
       {isEditOpen && <PatientForm patient={patient} onClose={() => setIsEditOpen(false)} />}
