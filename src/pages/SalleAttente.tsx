@@ -1,490 +1,565 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-    collection, query, where, onSnapshot, addDoc, updateDoc, doc, getDocs
+    collection,
+    query,
+    where,
+    onSnapshot,
+    addDoc,
+    updateDoc,
+    doc,
+    getDocs,
+    orderBy,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { useAuth } from '../contexts/AuthContext';
-import { useSettings } from '../hooks/useSettings';
-import { format, differenceInMinutes, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useNavigate } from 'react-router-dom';
 import {
-    Users, Clock, AlertTriangle, CheckCircle, Play, UserPlus,
-    ChevronUp, ChevronDown, Stethoscope, ClipboardList, X, Search,
-    Calendar, LogIn, Timer, XCircle
+    Users,
+    Clock,
+    CheckCircle,
+    XCircle,
+    AlertTriangle,
+    Play,
+    Square,
+    ChevronUp,
+    ChevronDown,
+    UserPlus,
+    Stethoscope,
+    ArrowRight,
+    Loader2,
+    ClipboardList,
 } from 'lucide-react';
-import type { FileAttenteEntry, StatutFileAttente, PrioriteFileAttente } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../hooks/useSettings';
 import PreConsultationForm from '../components/salle-attente/PreConsultationForm';
-import PostConsultationFlow from '../components/salle-attente/PostConsultationFlow';
+// *** CHANGEMENT : Import direct de PostConsultationModal, PAS PostConsultationFlow ***
+import PostConsultationModal from '../components/salle-attente/PostConsultationModal';
 
-interface PatientInfo {
-    id: string; nom: string; prenom: string; telephone?: string; allergies?: string;
-}
-interface AppointmentInfo {
-    id: string; patient_id: string; heure_rdv: string; motif?: string; statut: string;
-}
-
-const STATUT_CONFIG: Record<StatutFileAttente, { label: string; color: string; icon: React.ElementType }> = {
-    en_attente: { label: 'En file', color: 'bg-orange-100 text-orange-800', icon: Clock },
-    en_pre_consultation: { label: 'Pré-consultation', color: 'bg-yellow-100 text-yellow-800', icon: ClipboardList },
-    pret: { label: 'Prêt', color: 'bg-blue-100 text-blue-800', icon: CheckCircle },
-    en_consultation: { label: 'En consultation', color: 'bg-indigo-100 text-indigo-800', icon: Stethoscope },
-    termine: { label: 'Terminé', color: 'bg-green-100 text-green-800', icon: CheckCircle },
-    annule: { label: 'Annulé', color: 'bg-red-100 text-red-800', icon: X },
+const STATUT_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
+    en_attente: { label: 'En attente', color: 'bg-yellow-100 text-yellow-800', icon: Clock },
+    en_pre_consultation: { label: 'Pré-consultation', color: 'bg-blue-100 text-blue-800', icon: ClipboardList },
+    pre_consultation_terminee: { label: 'Prêt', color: 'bg-green-100 text-green-800', icon: CheckCircle },
+    en_consultation: { label: 'En consultation', color: 'bg-purple-100 text-purple-800', icon: Stethoscope },
+    termine: { label: 'Terminé', color: 'bg-gray-100 text-gray-800', icon: CheckCircle },
+    annule: { label: 'Annulé', color: 'bg-red-100 text-red-800', icon: XCircle },
 };
-const PRIORITE_CONFIG: Record<PrioriteFileAttente, { label: string; color: string }> = {
-    normale: { label: 'Normale', color: 'bg-slate-100 text-slate-700' },
-    urgente: { label: 'Urgente', color: 'bg-red-100 text-red-700' },
-    prioritaire: { label: 'Prioritaire', color: 'bg-amber-100 text-amber-700' },
-};
-const STATUT_FLOW: StatutFileAttente[] = ['en_attente', 'en_pre_consultation', 'pret', 'en_consultation', 'termine'];
 
-export default function SalleAttente() {
-    const { appUser } = useAuth();
+const PRIORITE_CONFIG: Record<string, { label: string; color: string }> = {
+    normale: { label: 'Normale', color: 'bg-gray-100 text-gray-700' },
+    urgente: { label: 'Urgente', color: 'bg-orange-100 text-orange-700' },
+    prioritaire: { label: 'Prioritaire', color: 'bg-red-100 text-red-700' },
+};
+
+const STATUT_FLOW = ['en_attente', 'en_pre_consultation', 'pre_consultation_terminee', 'en_consultation', 'termine'];
+
+const SalleAttente: React.FC = () => {
+    const { user } = useAuth();
     const { settings } = useSettings();
     const navigate = useNavigate();
+
+    const [entries, setEntries] = useState<any[]>([]);
+    const [patientsMap, setPatientsMap] = useState<Record<string, any>>({});
+    const [todayAppointments, setTodayAppointments] = useState<any[]>([]);
+    const [error, setError] = useState('');
+    const [timer, setTimer] = useState(0);
+
+    // Modals
+    const [showAddWalkIn, setShowAddWalkIn] = useState(false);
+    const [walkInPatientId, setWalkInPatientId] = useState('');
+    const [walkInMotif, setWalkInMotif] = useState('');
+    const [preConsultTarget, setPreConsultTarget] = useState<any>(null);
+    const [postConsultTarget, setPostConsultTarget] = useState<any>(null);
+
     const today = format(new Date(), 'yyyy-MM-dd');
 
-    const [entries, setEntries] = useState<(FileAttenteEntry & { [key: string]: any })[]>([]);
-    const [patientsMap, setPatientsMap] = useState<Record<string, PatientInfo>>({});
-    const [allPatients, setAllPatients] = useState<PatientInfo[]>([]);
-    const [todayAppointments, setTodayAppointments] = useState<AppointmentInfo[]>([]);
-    const [errorMsg, setErrorMsg] = useState('');
-    const [now, setNow] = useState(new Date());
-
-    // Modal walk-in
-    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-    const [patientSearch, setPatientSearch] = useState('');
-    const [selectedPatientId, setSelectedPatientId] = useState('');
-    const [selectedPatientLabel, setSelectedPatientLabel] = useState('');
-    const [isPatientListOpen, setIsPatientListOpen] = useState(false);
-    const [addPriorite, setAddPriorite] = useState<PrioriteFileAttente>('normale');
-    const [addMotif, setAddMotif] = useState('');
-    const [adding, setAdding] = useState(false);
-
-    // Pre-consultation overlay
-    const [preConsultTarget, setPreConsultTarget] = useState<{
-        entry: FileAttenteEntry & { [key: string]: any };
-        patientName: string;
-    } | null>(null);
-
-    // Post-consultation flow
-    const [postConsultTarget, setPostConsultTarget] = useState<{
-        entryId: string;
-        patientName: string;
-        appointmentId?: string;
-        patientId: string;
-        consultationId?: string;
-    } | null>(null);
-
-    // Refresh timer every 30s for live durations
+    // Timer refresh
     useEffect(() => {
-        const interval = setInterval(() => setNow(new Date()), 30000);
+        const interval = setInterval(() => setTimer((t) => t + 1), 30000);
         return () => clearInterval(interval);
     }, []);
 
-    // --- Firestore listeners ---
+    // Listener file_attente
     useEffect(() => {
-        const q = query(collection(db, 'file_attente'), where('date', '==', today));
+        const q = query(
+            collection(db, 'file_attente'),
+            where('date', '==', today)
+        );
         const unsub = onSnapshot(q, (snap) => {
-            const data = snap.docs.map((d) => ({ id: d.id, ...d.data() } as FileAttenteEntry & { [key: string]: any }));
-            data.sort((a, b) => a.numero_ordre - b.numero_ordre);
-            setEntries(data);
-        }, () => setErrorMsg('Erreur de chargement de la file d\'attente.'));
-        return () => unsub();
+            const list = snap.docs
+                .map((d) => ({ id: d.id, ...d.data() }))
+                .sort((a: any, b: any) => (a.ordre || 0) - (b.ordre || 0));
+            setEntries(list);
+        });
+        return unsub;
     }, [today]);
 
+    // Listener patients
     useEffect(() => {
         const unsub = onSnapshot(collection(db, 'patients'), (snap) => {
-            const map: Record<string, PatientInfo> = {};
-            const list: PatientInfo[] = [];
+            const map: Record<string, any> = {};
             snap.docs.forEach((d) => {
-                const data = d.data();
-                if (data.deleted) return;
-                const p: PatientInfo = { id: d.id, nom: data.nom || '', prenom: data.prenom || '', telephone: data.telephone, allergies: data.allergies };
-                map[d.id] = p;
-                list.push(p);
+                map[d.id] = { id: d.id, ...d.data() };
             });
             setPatientsMap(map);
-            setAllPatients(list.sort((a, b) => a.nom.localeCompare(b.nom)));
         });
-        return () => unsub();
+        return unsub;
     }, []);
 
+    // Listener rendez-vous du jour
     useEffect(() => {
-        const q = query(collection(db, 'appointments'), where('date_rdv', '==', today));
+        const q = query(
+            collection(db, 'appointments'),
+            where('date', '==', today)
+        );
         const unsub = onSnapshot(q, (snap) => {
-            const apts = snap.docs.map((d) => {
-                const data = d.data();
-                return { id: d.id, patient_id: data.patient_id, heure_rdv: data.heure_rdv, motif: data.motif, statut: data.statut } as AppointmentInfo;
-            });
-            apts.sort((a, b) => a.heure_rdv.localeCompare(b.heure_rdv));
-            setTodayAppointments(apts);
+            const list = snap.docs
+                .map((d) => ({ id: d.id, ...d.data() }))
+                .sort((a: any, b: any) => (a.heure || '').localeCompare(b.heure || ''));
+            setTodayAppointments(list);
         });
-        return () => unsub();
+        return unsub;
     }, [today]);
 
-    // --- Derived ---
+    // Calculs dérivés
     const appointmentIdsInQueue = useMemo(() => {
-        const ids = new Set<string>();
-        entries.forEach((e) => { if (e.appointment_id) ids.add(e.appointment_id); });
-        return ids;
+        return new Set(entries.map((e: any) => e.appointment_id).filter(Boolean));
     }, [entries]);
 
-    const pendingAppointments = useMemo(() =>
-        todayAppointments.filter((apt) =>
-            !appointmentIdsInQueue.has(apt.id) &&
-            !['annulé', 'annule', 'réalisé', 'termine', 'absent', 'no_show', 'en_salle'].includes(apt.statut)
-        ), [todayAppointments, appointmentIdsInQueue]);
+    const pendingAppointments = useMemo(() => {
+        return todayAppointments.filter(
+            (a: any) =>
+                !appointmentIdsInQueue.has(a.id) &&
+                a.statut !== 'annulé' &&
+                a.statut !== 'réalisé'
+        );
+    }, [todayAppointments, appointmentIdsInQueue]);
 
-    const activeEntries = useMemo(() =>
-        entries.filter((e) => e.statut !== 'termine' && e.statut !== 'annule')
-            .sort((a, b) => {
-                const prioOrder: Record<PrioriteFileAttente, number> = { urgente: 0, prioritaire: 1, normale: 2 };
-                if ((prioOrder[a.priorite] ?? 2) !== (prioOrder[b.priorite] ?? 2))
-                    return (prioOrder[a.priorite] ?? 2) - (prioOrder[b.priorite] ?? 2);
-                return a.numero_ordre - b.numero_ordre;
-            }), [entries]);
+    const activeEntries = useMemo(() => {
+        return entries
+            .filter((e: any) => !['termine', 'annule'].includes(e.statut))
+            .sort((a: any, b: any) => {
+                const prioOrder: Record<string, number> = { prioritaire: 0, urgente: 1, normale: 2 };
+                const pa = prioOrder[a.priorite] ?? 2;
+                const pb = prioOrder[b.priorite] ?? 2;
+                if (pa !== pb) return pa - pb;
+                return (a.ordre || 0) - (b.ordre || 0);
+            });
+    }, [entries]);
 
-    const completedEntries = useMemo(() =>
-        entries.filter((e) => e.statut === 'termine' || e.statut === 'annule'), [entries]);
+    const completedEntries = useMemo(() => {
+        return entries.filter((e: any) => ['termine', 'annule'].includes(e.statut));
+    }, [entries]);
 
-    const stats = useMemo(() => ({
-        enFile: activeEntries.filter((e) => e.statut === 'en_attente').length,
-        prets: activeEntries.filter((e) => e.statut === 'pret').length,
-        enConsultation: activeEntries.filter((e) => e.statut === 'en_consultation').length,
-        termines: completedEntries.filter((e) => e.statut === 'termine').length,
-        annules: completedEntries.filter((e) => e.statut === 'annule').length,
-        urgents: activeEntries.filter((e) => e.priorite === 'urgente').length,
-    }), [activeEntries, completedEntries]);
+    const stats = useMemo(() => {
+        const s = { total: entries.length, enAttente: 0, enConsultation: 0, termines: 0 };
+        entries.forEach((e: any) => {
+            if (e.statut === 'en_attente' || e.statut === 'en_pre_consultation' || e.statut === 'pre_consultation_terminee')
+                s.enAttente++;
+            else if (e.statut === 'en_consultation') s.enConsultation++;
+            else if (e.statut === 'termine') s.termines++;
+        });
+        return s;
+    }, [entries]);
 
-    const showError = (msg: string) => { setErrorMsg(msg); setTimeout(() => setErrorMsg(''), 5000); };
-    const isAssistante = appUser?.role === 'assistante';
-    const isMedecinOrAdmin = appUser?.role === 'admin' || appUser?.role === 'medecin';
-
-    const formatDuration = (minutes: number): string => {
-        if (minutes < 1) return '< 1 min';
-        if (minutes < 60) return `${Math.round(minutes)} min`;
-        const h = Math.floor(minutes / 60);
-        const m = Math.round(minutes % 60);
-        return `${h}h${m > 0 ? m.toString().padStart(2, '0') : ''}`;
+    // Formatage durée
+    const formatDuration = (ms: number) => {
+        const mins = Math.floor(ms / 60000);
+        if (mins < 60) return `${mins} min`;
+        const hrs = Math.floor(mins / 60);
+        const remainMins = mins % 60;
+        return `${hrs}h${remainMins.toString().padStart(2, '0')}`;
     };
 
-    const getEntryTimers = (entry: any) => {
-        const arrivee = entry.heure_arrivee_iso ? parseISO(entry.heure_arrivee_iso) : null;
-        const debutPreConsult = entry.heure_debut_pre_consultation ? parseISO(entry.heure_debut_pre_consultation) : null;
-        const finPreConsult = entry.heure_fin_pre_consultation ? parseISO(entry.heure_fin_pre_consultation) : null;
-        const debutConsult = entry.heure_debut_consultation ? parseISO(entry.heure_debut_consultation) : null;
-        const finConsult = entry.heure_fin_consultation ? parseISO(entry.heure_fin_consultation) : null;
-        const sortie = entry.heure_sortie ? parseISO(entry.heure_sortie) : null;
-
-        const dureeAttente = arrivee ? differenceInMinutes(debutPreConsult || debutConsult || now, arrivee) : null;
-        const dureePreConsult = debutPreConsult && finPreConsult ? differenceInMinutes(finPreConsult, debutPreConsult) : debutPreConsult ? differenceInMinutes(now, debutPreConsult) : null;
-        const dureeConsult = debutConsult && finConsult ? differenceInMinutes(finConsult, debutConsult) : debutConsult ? differenceInMinutes(now, debutConsult) : null;
-
-        return {
-            arrivee: entry.heure_arrivee || (arrivee ? format(arrivee, 'HH:mm') : '-'),
-            dureeAttente, dureePreConsult, dureeConsult,
-            sortie: sortie ? format(sortie, 'HH:mm') : null,
-        };
+    const getEntryDuration = (entry: any) => {
+        if (!entry.heure_arrivee) return '';
+        const arrival = new Date(entry.heure_arrivee).getTime();
+        const now = Date.now();
+        return formatDuration(now - arrival);
     };
 
-    // --- Actions ---
-    const handlePreConsult = async (entry: FileAttenteEntry & { [key: string]: any }) => {
-        const patient = patientsMap[entry.patient_id];
-        const patientName = patient ? `${patient.nom} ${patient.prenom}` : 'Patient';
-        if (entry.statut === 'en_attente') {
-            const nowDate = new Date();
+    // Actions
+    const handlePreConsult = async (entry: any) => {
+        try {
             await updateDoc(doc(db, 'file_attente', entry.id), {
                 statut: 'en_pre_consultation',
-                heure_debut_pre_consultation: nowDate.toISOString(),
-                updated_at: nowDate.toISOString(),
+                updated_at: new Date().toISOString(),
             });
+            if (entry.appointment_id) {
+                await updateDoc(doc(db, 'appointments', entry.appointment_id), {
+                    statut: 'en_pre_consultation',
+                });
+            }
+            setPreConsultTarget(entry);
+        } catch (err) {
+            console.error(err);
+            setError('Erreur lors du changement de statut.');
         }
-        setPreConsultTarget({ entry: { ...entry, statut: 'en_pre_consultation' }, patientName });
     };
 
-    const handleMarkReady = async (entry: FileAttenteEntry) => {
+    const handleMarkReady = async (entry: any) => {
         try {
-            await updateDoc(doc(db, 'file_attente', entry.id), { statut: 'pret', updated_at: new Date().toISOString() });
-        } catch (err) { showError('Erreur lors du changement de statut.'); }
-    };
-
-    const handleStartConsultation = async (entry: FileAttenteEntry & { [key: string]: any }) => {
-        try {
-            const nowDate = new Date();
             await updateDoc(doc(db, 'file_attente', entry.id), {
-                statut: 'en_consultation', heure_debut_consultation: nowDate.toISOString(), updated_at: nowDate.toISOString(),
+                statut: 'pre_consultation_terminee',
+                updated_at: new Date().toISOString(),
             });
-            navigate(`/patients/${entry.patient_id}?tab=consultations&consultationMode=active`);
-        } catch (err) { showError('Erreur lors du démarrage de la consultation.'); }
+        } catch (err) {
+            console.error(err);
+            setError('Erreur lors du changement de statut.');
+        }
     };
 
-    const handleTerminate = async (entry: FileAttenteEntry & { [key: string]: any }) => {
-        const patient = patientsMap[entry.patient_id];
-        const patientName = patient ? `${patient.nom} ${patient.prenom}` : 'Patient';
+    const handleStartConsultation = async (entry: any) => {
+        try {
+            await updateDoc(doc(db, 'file_attente', entry.id), {
+                statut: 'en_consultation',
+                heure_debut_consultation: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+            });
+            if (entry.appointment_id) {
+                await updateDoc(doc(db, 'appointments', entry.appointment_id), {
+                    statut: 'en_consultation',
+                });
+            }
+            navigate(`/patients/${entry.patient_id}?consultationMode=active`);
+        } catch (err) {
+            console.error(err);
+            setError('Erreur lors du démarrage de la consultation.');
+        }
+    };
+
+    const handleTerminate = (entry: any) => {
+        const patientData = patientsMap[entry.patient_id];
         setPostConsultTarget({
-            entryId: entry.id, patientName, appointmentId: entry.appointment_id,
-            patientId: entry.patient_id, consultationId: entry.consultation_id,
+            entryId: entry.id,
+            patientName: patientData
+                ? `${patientData.nom || ''} ${patientData.prenom || ''}`
+                : 'Patient',
+            appointmentId: entry.appointment_id,
+            patientId: entry.patient_id,
+            consultationId: entry.consultation_id,
         });
     };
 
-    const setStatus = async (entryId: string, statut: StatutFileAttente, appointmentId?: string) => {
+    const setStatus = async (entryId: string, statut: string, appointmentId?: string) => {
         try {
-            const updates: any = { statut, updated_at: new Date().toISOString() };
-            if (statut === 'termine' || statut === 'annule') updates.heure_sortie = new Date().toISOString();
-            await updateDoc(doc(db, 'file_attente', entryId), updates);
-            if (statut === 'annule' && appointmentId) {
-                await updateDoc(doc(db, 'appointments', appointmentId), { statut: 'confirmé', updated_at: new Date().toISOString() });
-            }
-        } catch (err) { showError('Erreur lors du changement de statut.'); }
-    };
-
-    const changePriorite = async (entryId: string, priorite: PrioriteFileAttente) => {
-        try { await updateDoc(doc(db, 'file_attente', entryId), { priorite, updated_at: new Date().toISOString() }); }
-        catch (err) { showError('Erreur lors du changement de priorité.'); }
-    };
-
-    const moveEntry = async (entryIndex: number, direction: 'up' | 'down') => {
-        const swapIdx = direction === 'up' ? entryIndex - 1 : entryIndex + 1;
-        if (swapIdx < 0 || swapIdx >= activeEntries.length) return;
-        const a = activeEntries[entryIndex], b = activeEntries[swapIdx];
-        try {
-            await updateDoc(doc(db, 'file_attente', a.id), { numero_ordre: b.numero_ordre, updated_at: new Date().toISOString() });
-            await updateDoc(doc(db, 'file_attente', b.id), { numero_ordre: a.numero_ordre, updated_at: new Date().toISOString() });
-        } catch (err) { showError('Erreur lors du déplacement.'); }
-    };
-
-    const registerArrival = async (apt: AppointmentInfo) => {
-        try {
-            const maxOrdre = entries.length > 0 ? Math.max(...entries.map((e) => e.numero_ordre)) : 0;
-            const nowDate = new Date();
-            await addDoc(collection(db, 'file_attente'), {
-                patient_id: apt.patient_id, appointment_id: apt.id, date: today,
-                numero_ordre: maxOrdre + 1, heure_arrivee: format(nowDate, 'HH:mm'),
-                heure_arrivee_iso: nowDate.toISOString(),
-                statut: 'en_attente', priorite: 'normale', motif: apt.motif || '',
-                created_by: appUser?.uid || '', created_at: nowDate.toISOString(), updated_at: nowDate.toISOString(),
+            await updateDoc(doc(db, 'file_attente', entryId), {
+                statut,
+                updated_at: new Date().toISOString(),
             });
-            await updateDoc(doc(db, 'appointments', apt.id), { statut: 'en_salle', updated_at: nowDate.toISOString() });
-        } catch (err) { showError('Erreur lors de l\'enregistrement de l\'arrivée.'); }
+            if (appointmentId && statut === 'annule') {
+                await updateDoc(doc(db, 'appointments', appointmentId), {
+                    statut: 'annulé',
+                });
+            }
+        } catch (err) {
+            console.error(err);
+            setError('Erreur lors du changement de statut.');
+        }
+    };
+
+    const changePriorite = async (entryId: string, priorite: string) => {
+        try {
+            await updateDoc(doc(db, 'file_attente', entryId), {
+                priorite,
+                updated_at: new Date().toISOString(),
+            });
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const moveEntry = async (entryId: string, direction: 'up' | 'down') => {
+        const idx = activeEntries.findIndex((e: any) => e.id === entryId);
+        if (idx < 0) return;
+        const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+        if (swapIdx < 0 || swapIdx >= activeEntries.length) return;
+
+        const entryA = activeEntries[idx];
+        const entryB = activeEntries[swapIdx];
+
+        try {
+            await updateDoc(doc(db, 'file_attente', entryA.id), { ordre: entryB.ordre || swapIdx });
+            await updateDoc(doc(db, 'file_attente', entryB.id), { ordre: entryA.ordre || idx });
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const registerArrival = async (appointment: any) => {
+        try {
+            const maxOrdre = entries.reduce((max: number, e: any) => Math.max(max, e.ordre || 0), 0);
+            await addDoc(collection(db, 'file_attente'), {
+                patient_id: appointment.patient_id,
+                appointment_id: appointment.id,
+                date: today,
+                heure_arrivee: new Date().toISOString(),
+                statut: 'en_attente',
+                priorite: 'normale',
+                ordre: maxOrdre + 1,
+                created_by: user?.uid || '',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+            });
+            await updateDoc(doc(db, 'appointments', appointment.id), {
+                statut: 'en_salle',
+            });
+        } catch (err) {
+            console.error(err);
+            setError("Erreur lors de l'enregistrement de l'arrivée.");
+        }
     };
 
     const handleAddWalkIn = async () => {
-        if (!selectedPatientId) return;
-        setAdding(true);
+        if (!walkInPatientId) return;
         try {
-            const maxOrdre = entries.length > 0 ? Math.max(...entries.map((e) => e.numero_ordre)) : 0;
-            const nowDate = new Date();
+            const maxOrdre = entries.reduce((max: number, e: any) => Math.max(max, e.ordre || 0), 0);
             await addDoc(collection(db, 'file_attente'), {
-                patient_id: selectedPatientId, date: today,
-                numero_ordre: maxOrdre + 1, heure_arrivee: format(nowDate, 'HH:mm'),
-                heure_arrivee_iso: nowDate.toISOString(),
-                statut: 'en_attente', priorite: addPriorite, motif: addMotif || '',
-                created_by: appUser?.uid || '', created_at: nowDate.toISOString(), updated_at: nowDate.toISOString(),
+                patient_id: walkInPatientId,
+                date: today,
+                heure_arrivee: new Date().toISOString(),
+                statut: 'en_attente',
+                priorite: 'normale',
+                ordre: maxOrdre + 1,
+                motif: walkInMotif || 'Sans rendez-vous',
+                type: 'walk-in',
+                created_by: user?.uid || '',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
             });
-            closeAddModal();
-        } catch (err) { showError('Erreur lors de l\'ajout.'); }
-        finally { setAdding(false); }
+            setShowAddWalkIn(false);
+            setWalkInPatientId('');
+            setWalkInMotif('');
+        } catch (err) {
+            console.error(err);
+            setError("Erreur lors de l'ajout du patient sans rendez-vous.");
+        }
     };
 
-    const closeAddModal = () => {
-        setIsAddModalOpen(false); setSelectedPatientId(''); setSelectedPatientLabel('');
-        setPatientSearch(''); setIsPatientListOpen(false); setAddPriorite('normale'); setAddMotif('');
-    };
-
-    const filteredAddPatients = useMemo(() => {
-        if (!patientSearch.trim()) return [];
-        const s = patientSearch.toLowerCase();
-        return allPatients.filter((p) => p.nom.toLowerCase().includes(s) || p.prenom.toLowerCase().includes(s) || (p.telephone || '').includes(s)).slice(0, 10);
-    }, [patientSearch, allPatients]);
-
-    const getActionButtons = (entry: FileAttenteEntry & { [key: string]: any }) => {
-        const buttons: React.ReactNode[] = [];
-        if (entry.statut === 'en_attente') {
-            buttons.push(
-                <button key="preconsult" onClick={() => handlePreConsult(entry)} className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-yellow-500 text-white hover:bg-yellow-600">
-                    <ClipboardList className="h-3 w-3 mr-1" />Pré-consult
-                </button>
-            );
-        }
-        if (entry.statut === 'en_pre_consultation') {
-            buttons.push(
-                <button key="reprendre" onClick={() => handlePreConsult(entry)} className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-yellow-500 text-white hover:bg-yellow-600">
-                    <ClipboardList className="h-3 w-3 mr-1" />Reprendre
-                </button>,
-                <button key="pret" onClick={() => handleMarkReady(entry)} className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-blue-600 text-white hover:bg-blue-700">
-                    <CheckCircle className="h-3 w-3 mr-1" />Prêt
-                </button>
-            );
-        }
-        if (entry.statut === 'pret' && isMedecinOrAdmin) {
-            buttons.push(
-                <button key="consulter" onClick={() => handleStartConsultation(entry)} className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700">
-                    <Stethoscope className="h-3 w-3 mr-1" />Consulter
-                </button>
-            );
-        }
-        if (entry.statut === 'en_consultation') {
-            buttons.push(
-                <button key="terminer" onClick={() => handleTerminate(entry)} className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-green-600 text-white hover:bg-green-700">
-                    <CheckCircle className="h-3 w-3 mr-1" />Terminer
-                </button>
-            );
-        }
-        return buttons;
+    const getPatientName = (patientId: string) => {
+        const p = patientsMap[patientId];
+        return p ? `${p.nom || ''} ${p.prenom || ''}`.trim() : 'Patient inconnu';
     };
 
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="sm:flex sm:items-center sm:justify-between">
+            <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-semibold text-slate-900">Salle d'attente</h1>
-                    <p className="mt-1 text-sm text-slate-500">{format(new Date(), 'EEEE d MMMM yyyy', { locale: fr })}</p>
+                    <h1 className="text-2xl font-bold text-gray-900">Salle d'attente</h1>
+                    <p className="text-sm text-gray-500 mt-1">
+                        {format(new Date(), 'EEEE d MMMM yyyy', { locale: fr })}
+                    </p>
                 </div>
-                <button onClick={() => setIsAddModalOpen(true)} className="mt-4 sm:mt-0 inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700">
-                    <UserPlus className="-ml-1 mr-2 h-5 w-5" />Patient sans RDV
+                <button
+                    onClick={() => setShowAddWalkIn(true)}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700"
+                >
+                    <UserPlus className="w-4 h-4" />
+                    Sans rendez-vous
                 </button>
             </div>
 
-            {errorMsg && (
-                <div className="rounded-md bg-red-50 border border-red-200 p-4">
-                    <div className="flex items-start">
-                        <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5 mr-3 flex-shrink-0" />
-                        <p className="text-sm text-red-700">{errorMsg}</p>
-                        <button onClick={() => setErrorMsg('')} className="ml-auto text-red-400 hover:text-red-600"><X className="h-4 w-4" /></button>
-                    </div>
+            {/* Erreur */}
+            {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-red-600" />
+                    <span className="text-sm text-red-700">{error}</span>
+                    <button onClick={() => setError('')} className="ml-auto text-red-400 hover:text-red-600">
+                        <XCircle className="w-4 h-4" />
+                    </button>
                 </div>
             )}
 
-            {/* Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                {[
-                    { icon: Clock, value: stats.enFile, label: 'En file', color: 'text-orange-500', vColor: 'text-orange-600' },
-                    { icon: CheckCircle, value: stats.prets, label: 'Prêts', color: 'text-blue-500', vColor: 'text-blue-600' },
-                    { icon: Stethoscope, value: stats.enConsultation, label: 'En consultation', color: 'text-indigo-500', vColor: 'text-indigo-600' },
-                    { icon: CheckCircle, value: stats.termines, label: 'Terminés', color: 'text-green-500', vColor: 'text-green-600' },
-                    { icon: XCircle, value: stats.annules, label: 'Annulés', color: 'text-red-400', vColor: 'text-red-500' },
-                ].map(({ icon: Icon, value, label, color, vColor }) => (
-                    <div key={label} className="bg-white rounded-lg border border-slate-200 p-4 text-center">
-                        <Icon className={`h-6 w-6 ${color} mx-auto`} />
-                        <p className={`mt-2 text-2xl font-bold ${vColor}`}>{value}</p>
-                        <p className="text-xs text-slate-500">{label}</p>
-                    </div>
-                ))}
-                {stats.urgents > 0 && (
-                    <div className="bg-red-50 rounded-lg border border-red-200 p-4 text-center">
-                        <AlertTriangle className="h-6 w-6 text-red-500 mx-auto" />
-                        <p className="mt-2 text-2xl font-bold text-red-600">{stats.urgents}</p>
-                        <p className="text-xs text-red-500">Urgences</p>
-                    </div>
-                )}
+            {/* Statistiques */}
+            <div className="grid grid-cols-4 gap-4">
+                <div className="bg-white rounded-lg border p-4 text-center">
+                    <Users className="w-6 h-6 text-indigo-600 mx-auto mb-1" />
+                    <p className="text-2xl font-bold">{stats.total}</p>
+                    <p className="text-xs text-gray-500">Total</p>
+                </div>
+                <div className="bg-white rounded-lg border p-4 text-center">
+                    <Clock className="w-6 h-6 text-yellow-600 mx-auto mb-1" />
+                    <p className="text-2xl font-bold">{stats.enAttente}</p>
+                    <p className="text-xs text-gray-500">En attente</p>
+                </div>
+                <div className="bg-white rounded-lg border p-4 text-center">
+                    <Stethoscope className="w-6 h-6 text-purple-600 mx-auto mb-1" />
+                    <p className="text-2xl font-bold">{stats.enConsultation}</p>
+                    <p className="text-xs text-gray-500">En consultation</p>
+                </div>
+                <div className="bg-white rounded-lg border p-4 text-center">
+                    <CheckCircle className="w-6 h-6 text-green-600 mx-auto mb-1" />
+                    <p className="text-2xl font-bold">{stats.termines}</p>
+                    <p className="text-xs text-gray-500">Terminés</p>
+                </div>
             </div>
 
-            {/* RDV du jour en attente */}
+            {/* Rendez-vous en attente d'arrivée */}
             {pendingAppointments.length > 0 && (
-                <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-200 bg-indigo-50">
-                        <h2 className="text-lg font-medium text-indigo-900 flex items-center">
-                            <Calendar className="h-5 w-5 mr-2 text-indigo-600" />
-                            Rendez-vous du jour — En attente d'arrivée ({pendingAppointments.length})
-                        </h2>
-                    </div>
-                    <div className="divide-y divide-slate-100">
-                        {pendingAppointments.map((apt) => {
-                            const patient = patientsMap[apt.patient_id];
-                            return (
-                                <div key={apt.id} className="px-6 py-3 flex items-center justify-between hover:bg-slate-50">
-                                    <div className="flex items-center gap-4">
-                                        <span className="text-lg font-bold text-indigo-600">{apt.heure_rdv}</span>
-                                        <div>
-                                            <p className="text-sm font-medium text-slate-900">{patient ? `${patient.nom} ${patient.prenom}` : 'Patient inconnu'}</p>
-                                            <p className="text-xs text-slate-500">{apt.motif || 'Pas de motif'}</p>
-                                        </div>
-                                    </div>
-                                    <button onClick={() => registerArrival(apt)} className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-green-600 text-white hover:bg-green-700">
-                                        <LogIn className="h-3.5 w-3.5 mr-1" />Enregistrer l'arrivée
-                                    </button>
+                <div className="bg-white rounded-xl border p-4">
+                    <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">
+                        Rendez-vous du jour — En attente d'arrivée ({pendingAppointments.length})
+                    </h2>
+                    <div className="space-y-2">
+                        {pendingAppointments.map((apt: any) => (
+                            <div
+                                key={apt.id}
+                                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                            >
+                                <div>
+                                    <span className="font-medium text-gray-900">
+                                        {getPatientName(apt.patient_id)}
+                                    </span>
+                                    <span className="text-sm text-gray-500 ml-3">{apt.heure || '—'}</span>
+                                    {apt.motif && (
+                                        <span className="text-sm text-gray-400 ml-2">— {apt.motif}</span>
+                                    )}
                                 </div>
-                            );
-                        })}
+                                <button
+                                    onClick={() => registerArrival(apt)}
+                                    className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100"
+                                >
+                                    <ArrowRight className="w-4 h-4" />
+                                    Arrivée
+                                </button>
+                            </div>
+                        ))}
                     </div>
                 </div>
             )}
 
-            {/* File active */}
-            <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
-                    <h2 className="text-lg font-medium text-slate-900">File d'attente active ({activeEntries.length})</h2>
+            {/* File d'attente active */}
+            <div className="bg-white rounded-xl border">
+                <div className="p-4 border-b">
+                    <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                        File d'attente ({activeEntries.length})
+                    </h2>
                 </div>
                 {activeEntries.length === 0 ? (
-                    <div className="p-12 text-center text-sm text-slate-500">Aucun patient en file d'attente.</div>
+                    <div className="p-8 text-center text-gray-400">
+                        <Clock className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                        <p>Aucun patient en attente</p>
+                    </div>
                 ) : (
-                    <div className="divide-y divide-slate-200">
-                        {activeEntries.map((entry, index) => {
-                            const patient = patientsMap[entry.patient_id];
-                            const statutInfo = STATUT_CONFIG[entry.statut];
-                            const prioriteInfo = PRIORITE_CONFIG[entry.priorite];
-                            const StatusIcon = statutInfo.icon;
-                            const linkedApt = entry.appointment_id ? todayAppointments.find((a) => a.id === entry.appointment_id) : undefined;
-                            const hasPreConsult = !!(entry as any).pre_consultation?.effectuee_at;
-                            const timers = getEntryTimers(entry);
+                    <div className="divide-y">
+                        {activeEntries.map((entry: any, idx: number) => {
+                            const statusConf = STATUT_CONFIG[entry.statut] || STATUT_CONFIG.en_attente;
+                            const prioConf = PRIORITE_CONFIG[entry.priorite] || PRIORITE_CONFIG.normale;
+                            const StatusIcon = statusConf.icon;
+                            const duration = getEntryDuration(entry);
 
                             return (
-                                <div key={entry.id} className={`px-6 py-4 hover:bg-slate-50 transition-colors ${entry.priorite === 'urgente' ? 'border-l-4 border-l-red-500 bg-red-50/30' : entry.priorite === 'prioritaire' ? 'border-l-4 border-l-amber-500 bg-amber-50/30' : ''}`}>
+                                <div key={entry.id} className="p-4 hover:bg-gray-50">
                                     <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-4">
-                                            <div className="flex-shrink-0 h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center">
-                                                <span className="text-lg font-bold text-indigo-600">{entry.numero_ordre}</span>
+                                        <div className="flex items-center gap-3">
+                                            {/* Ordre */}
+                                            <div className="flex flex-col items-center gap-0.5">
+                                                <button
+                                                    onClick={() => moveEntry(entry.id, 'up')}
+                                                    disabled={idx === 0}
+                                                    className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30"
+                                                >
+                                                    <ChevronUp className="w-3 h-3" />
+                                                </button>
+                                                <span className="text-xs font-mono text-gray-400">{idx + 1}</span>
+                                                <button
+                                                    onClick={() => moveEntry(entry.id, 'down')}
+                                                    disabled={idx === activeEntries.length - 1}
+                                                    className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30"
+                                                >
+                                                    <ChevronDown className="w-3 h-3" />
+                                                </button>
                                             </div>
-                                            {isMedecinOrAdmin && (
-                                                <div className="flex flex-col gap-0.5">
-                                                    <button onClick={() => moveEntry(index, 'up')} disabled={index === 0} className="p-0.5 rounded hover:bg-slate-200 disabled:opacity-30"><ChevronUp className="h-4 w-4 text-slate-500" /></button>
-                                                    <button onClick={() => moveEntry(index, 'down')} disabled={index === activeEntries.length - 1} className="p-0.5 rounded hover:bg-slate-200 disabled:opacity-30"><ChevronDown className="h-4 w-4 text-slate-500" /></button>
-                                                </div>
-                                            )}
+
+                                            {/* Info patient */}
                                             <div>
-                                                <p className="text-sm font-medium text-slate-900">
-                                                    {patient ? `${patient.nom} ${patient.prenom}` : 'Patient inconnu'}
-                                                    {patient?.allergies && <span className="ml-2 text-xs text-red-600 font-normal">⚠ {patient.allergies}</span>}
-                                                </p>
-                                                <div className="flex items-center gap-3 mt-1 flex-wrap">
-                                                    {linkedApt && <span className="text-xs text-indigo-500 font-medium">RDV : {linkedApt.heure_rdv}</span>}
-                                                    {!linkedApt && !entry.appointment_id && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600">Sans RDV</span>}
-                                                    {entry.motif && <span className="text-xs text-slate-500">• {entry.motif}</span>}
-                                                    {hasPreConsult && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Pré-consult ✓</span>}
+                                                <span className="font-medium text-gray-900">
+                                                    {getPatientName(entry.patient_id)}
+                                                </span>
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${statusConf.color}`}>
+                                                        <StatusIcon className="w-3 h-3" />
+                                                        {statusConf.label}
+                                                    </span>
+                                                    {entry.priorite !== 'normale' && (
+                                                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${prioConf.color}`}>
+                                                            {prioConf.label}
+                                                        </span>
+                                                    )}
+                                                    {duration && (
+                                                        <span className="text-xs text-gray-400">{duration}</span>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
+
+                                        {/* Actions */}
                                         <div className="flex items-center gap-2">
-                                            {entry.priorite !== 'normale' && (
-                                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${prioriteInfo.color}`}>
-                                                    {entry.priorite === 'urgente' && <AlertTriangle className="h-3 w-3 mr-1" />}{prioriteInfo.label}
-                                                </span>
+                                            {/* Priorité */}
+                                            <select
+                                                value={entry.priorite || 'normale'}
+                                                onChange={(e) => changePriorite(entry.id, e.target.value)}
+                                                className="text-xs border border-gray-200 rounded px-2 py-1"
+                                            >
+                                                <option value="normale">Normale</option>
+                                                <option value="urgente">Urgente</option>
+                                                <option value="prioritaire">Prioritaire</option>
+                                            </select>
+
+                                            {/* Bouton contextuel selon statut */}
+                                            {entry.statut === 'en_attente' && (
+                                                <button
+                                                    onClick={() => handlePreConsult(entry)}
+                                                    className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100"
+                                                >
+                                                    <ClipboardList className="w-4 h-4" />
+                                                    Pré-consult
+                                                </button>
                                             )}
-                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statutInfo.color}`}>
-                                                <StatusIcon className="h-3 w-3 mr-1" />{statutInfo.label}
-                                            </span>
-                                            {getActionButtons(entry)}
-                                            {isMedecinOrAdmin && entry.statut !== 'termine' && (
-                                                <select value={entry.priorite} onChange={(e) => changePriorite(entry.id, e.target.value as PrioriteFileAttente)} className="rounded-md border border-slate-300 text-xs py-1 pl-2 pr-6">
-                                                    <option value="normale">Normale</option>
-                                                    <option value="prioritaire">Prioritaire</option>
-                                                    <option value="urgente">Urgente</option>
-                                                </select>
+                                            {entry.statut === 'en_pre_consultation' && (
+                                                <button
+                                                    onClick={() => setPreConsultTarget(entry)}
+                                                    className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100"
+                                                >
+                                                    <ClipboardList className="w-4 h-4" />
+                                                    Continuer pré-consult
+                                                </button>
                                             )}
-                                            {entry.statut !== 'termine' && entry.statut !== 'annule' && (
-                                                <button onClick={() => setStatus(entry.id, 'annule', entry.appointment_id)} className="p-1.5 rounded-md text-red-500 hover:bg-red-50" title="Annuler"><X className="h-4 w-4" /></button>
+                                            {entry.statut === 'pre_consultation_terminee' && (
+                                                <button
+                                                    onClick={() => handleStartConsultation(entry)}
+                                                    className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-purple-700 bg-purple-50 rounded-lg hover:bg-purple-100"
+                                                >
+                                                    <Play className="w-4 h-4" />
+                                                    Consultation
+                                                </button>
+                                            )}
+                                            {entry.statut === 'en_consultation' && (
+                                                <button
+                                                    onClick={() => handleTerminate(entry)}
+                                                    className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100"
+                                                >
+                                                    <Square className="w-4 h-4" />
+                                                    Terminer
+                                                </button>
+                                            )}
+
+                                            {/* Annuler */}
+                                            {!['termine', 'annule'].includes(entry.statut) && (
+                                                <button
+                                                    onClick={() => {
+                                                        if (window.confirm('Annuler cette entrée ?')) {
+                                                            setStatus(entry.id, 'annule', entry.appointment_id);
+                                                        }
+                                                    }}
+                                                    className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded"
+                                                    title="Annuler"
+                                                >
+                                                    <XCircle className="w-4 h-4" />
+                                                </button>
                                             )}
                                         </div>
-                                    </div>
-                                    <div className="mt-2 ml-14 flex items-center gap-4 flex-wrap text-xs text-slate-500">
-                                        <span className="flex items-center gap-1"><Timer className="h-3 w-3" />Arrivée : {timers.arrivee}</span>
-                                        {timers.dureeAttente !== null && <span>Attente : <strong className="text-orange-600">{formatDuration(timers.dureeAttente)}</strong></span>}
-                                        {timers.dureePreConsult !== null && <span>Pré-consult : <strong className="text-yellow-600">{formatDuration(timers.dureePreConsult)}</strong></span>}
-                                        {timers.dureeConsult !== null && <span>Consultation : <strong className="text-indigo-600">{formatDuration(timers.dureeConsult)}</strong></span>}
-                                        {timers.sortie && <span>Sortie : <strong className="text-green-600">{timers.sortie}</strong></span>}
                                     </div>
                                 </div>
                             );
@@ -493,33 +568,23 @@ export default function SalleAttente() {
                 )}
             </div>
 
-            {/* Terminés */}
+            {/* Patients terminés / annulés */}
             {completedEntries.length > 0 && (
-                <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
-                        <h2 className="text-lg font-medium text-slate-500">Terminés / Annulés aujourd'hui ({completedEntries.length})</h2>
+                <div className="bg-white rounded-xl border">
+                    <div className="p-4 border-b">
+                        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                            Terminés / Annulés ({completedEntries.length})
+                        </h2>
                     </div>
-                    <div className="divide-y divide-slate-100">
-                        {completedEntries.map((entry) => {
-                            const patient = patientsMap[entry.patient_id];
-                            const statutInfo = STATUT_CONFIG[entry.statut];
-                            const timers = getEntryTimers(entry);
+                    <div className="divide-y">
+                        {completedEntries.map((entry: any) => {
+                            const statusConf = STATUT_CONFIG[entry.statut] || STATUT_CONFIG.termine;
                             return (
-                                <div key={entry.id} className="px-6 py-3 flex items-center justify-between opacity-60">
-                                    <div className="flex items-center gap-3">
-                                        <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center"><span className="text-sm font-medium text-slate-400">{entry.numero_ordre}</span></div>
-                                        <div>
-                                            <p className="text-sm text-slate-600">{patient ? `${patient.nom} ${patient.prenom}` : 'Patient inconnu'}</p>
-                                            <div className="flex items-center gap-3 text-xs text-slate-400">
-                                                <span>Arrivée : {timers.arrivee}</span>
-                                                {timers.sortie && <span>Sortie : {timers.sortie}</span>}
-                                                {timers.dureeAttente !== null && <span>Attente : {formatDuration(timers.dureeAttente)}</span>}
-                                                {timers.dureePreConsult !== null && <span>Pré-consult : {formatDuration(timers.dureePreConsult)}</span>}
-                                                {timers.dureeConsult !== null && <span>Consult : {formatDuration(timers.dureeConsult)}</span>}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statutInfo.color}`}>{statutInfo.label}</span>
+                                <div key={entry.id} className="p-3 flex items-center justify-between opacity-60">
+                                    <span className="text-sm text-gray-700">{getPatientName(entry.patient_id)}</span>
+                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusConf.color}`}>
+                                        {statusConf.label}
+                                    </span>
                                 </div>
                             );
                         })}
@@ -527,76 +592,73 @@ export default function SalleAttente() {
                 </div>
             )}
 
-            {/* Modal walk-in */}
-            {isAddModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center">
-                    <div className="fixed inset-0 bg-black/50" onClick={closeAddModal} />
-                    <div className="relative bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6 z-50">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-medium text-slate-900">Ajouter un patient sans RDV</h3>
-                            <button onClick={closeAddModal} className="text-slate-400 hover:text-slate-600"><X className="h-5 w-5" /></button>
+            {/* Modal : Ajout sans rendez-vous */}
+            {showAddWalkIn && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+                        <h2 className="text-lg font-bold text-gray-900">Patient sans rendez-vous</h2>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Patient</label>
+                            <select
+                                value={walkInPatientId}
+                                onChange={(e) => setWalkInPatientId(e.target.value)}
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            >
+                                <option value="">Sélectionner un patient</option>
+                                {Object.values(patientsMap)
+                                    .sort((a: any, b: any) => (a.nom || '').localeCompare(b.nom || ''))
+                                    .map((p: any) => (
+                                        <option key={p.id} value={p.id}>
+                                            {p.nom} {p.prenom}
+                                        </option>
+                                    ))}
+                            </select>
                         </div>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Patient</label>
-                                {selectedPatientId ? (
-                                    <div className="flex items-center justify-between rounded-md border border-green-300 bg-green-50 px-3 py-2">
-                                        <div className="flex items-center gap-2">
-                                            <CheckCircle className="h-4 w-4 text-green-600" />
-                                            <span className="text-sm font-medium text-green-800">{selectedPatientLabel}</span>
-                                        </div>
-                                        <button onClick={() => { setSelectedPatientId(''); setSelectedPatientLabel(''); setPatientSearch(''); }} className="text-green-600 hover:text-green-800"><X className="h-4 w-4" /></button>
-                                    </div>
-                                ) : (
-                                    <div className="relative">
-                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                                        <input type="text" value={patientSearch} onChange={(e) => { setPatientSearch(e.target.value); setIsPatientListOpen(true); if (selectedPatientId) { setSelectedPatientId(''); setSelectedPatientLabel(''); } }} onFocus={() => patientSearch.trim() && setIsPatientListOpen(true)} placeholder="Rechercher par nom ou téléphone..." autoFocus className="w-full pl-10 pr-3 py-2 rounded-md border border-slate-300 text-sm" />
-                                        {isPatientListOpen && patientSearch.trim() && (
-                                            <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-auto rounded-md border border-slate-200 bg-white shadow-lg">
-                                                {filteredAddPatients.map((p) => (
-                                                    <li key={p.id} onClick={() => { setSelectedPatientId(p.id); setSelectedPatientLabel(`${p.nom} ${p.prenom}`); setPatientSearch(''); setIsPatientListOpen(false); }} className="px-3 py-2 text-sm cursor-pointer hover:bg-indigo-50 hover:text-indigo-700">
-                                                        <span className="font-medium">{p.nom} {p.prenom}</span>
-                                                        {p.telephone && <span className="ml-2 text-slate-400">— {p.telephone}</span>}
-                                                    </li>
-                                                ))}
-                                                {filteredAddPatients.length === 0 && <li className="px-3 py-2 text-sm text-slate-500 italic">Aucun patient trouvé</li>}
-                                            </ul>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Priorité</label>
-                                <select value={addPriorite} onChange={(e) => setAddPriorite(e.target.value as PrioriteFileAttente)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
-                                    <option value="normale">Normale</option>
-                                    <option value="prioritaire">Prioritaire</option>
-                                    <option value="urgente">Urgente</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Motif (optionnel)</label>
-                                <input type="text" value={addMotif} onChange={(e) => setAddMotif(e.target.value)} placeholder="Suivi, Douleurs abdominales..." className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-                            </div>
-                            <button onClick={handleAddWalkIn} disabled={!selectedPatientId || adding} className="w-full inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
-                                <UserPlus className="-ml-1 mr-2 h-4 w-4" />{adding ? 'Ajout en cours...' : 'Ajouter à la file'}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Motif</label>
+                            <input
+                                type="text"
+                                value={walkInMotif}
+                                onChange={(e) => setWalkInMotif(e.target.value)}
+                                placeholder="Motif de la visite..."
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            />
+                        </div>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => {
+                                    setShowAddWalkIn(false);
+                                    setWalkInPatientId('');
+                                    setWalkInMotif('');
+                                }}
+                                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                            >
+                                Annuler
+                            </button>
+                            <button
+                                onClick={handleAddWalkIn}
+                                disabled={!walkInPatientId}
+                                className="px-4 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                            >
+                                Ajouter
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Pre-consultation overlay */}
+            {/* Modal : Pré-consultation */}
             {preConsultTarget && (
                 <PreConsultationForm
-                    entry={preConsultTarget.entry}
-                    patientName={preConsultTarget.patientName}
+                    entry={preConsultTarget}
+                    patientName={getPatientName(preConsultTarget.patient_id)}
                     onClose={() => setPreConsultTarget(null)}
                 />
             )}
 
-            {/* Post-consultation flow (3 étapes: examens → ordonnance → checklist) */}
+            {/* *** CHANGEMENT : PostConsultationModal direct, PAS PostConsultationFlow *** */}
             {postConsultTarget && (
-                <PostConsultationFlow
+                <PostConsultationModal
                     entryId={postConsultTarget.entryId}
                     patientName={postConsultTarget.patientName}
                     appointmentId={postConsultTarget.appointmentId}
@@ -607,4 +669,6 @@ export default function SalleAttente() {
             )}
         </div>
     );
-}
+};
+
+export default SalleAttente;

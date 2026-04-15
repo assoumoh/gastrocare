@@ -1,195 +1,273 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import {
+  collection,
+  query,
+  orderBy,
+  limit,
+  onSnapshot,
+  doc,
+} from 'firebase/firestore';
 import { db } from '../firebase';
-import { Plus, Search, FileSignature, User, Calendar, Pill, Printer } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { Search, Eye, Printer, Edit, FileText } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import PrescriptionForm from '../components/prescriptions/PrescriptionForm';
 import PrescriptionPrintView from '../components/prescriptions/PrescriptionPrintView';
-import { Link } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
 
-export default function Prescriptions() {
-  const { appUser } = useAuth();
+const Prescriptions: React.FC = () => {
+  const { user } = useAuth();
   const [prescriptions, setPrescriptions] = useState<any[]>([]);
   const [patients, setPatients] = useState<Record<string, any>>({});
   const [medicaments, setMedicaments] = useState<Record<string, any>>({});
-  const [search, setSearch] = useState('');
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [isPrintOpen, setIsPrintOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showForm, setShowForm] = useState(false);
   const [selectedPrescription, setSelectedPrescription] = useState<any>(null);
+  const [showPrint, setShowPrint] = useState(false);
+  const [printPrescription, setPrintPrescription] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  const isAssistante = appUser?.role === 'assistante';
-
+  // Charger les patients
   useEffect(() => {
-    const unsubPatients = onSnapshot(collection(db, 'patients'), (snapshot) => {
-      const pts: Record<string, any> = {};
-      snapshot.docs.forEach(doc => {
-        pts[doc.id] = doc.data();
+    const unsub = onSnapshot(collection(db, 'patients'), (snap) => {
+      const map: Record<string, any> = {};
+      snap.docs.forEach((d) => {
+        map[d.id] = { id: d.id, ...d.data() };
       });
-      setPatients(pts);
+      setPatients(map);
     });
-    return () => unsubPatients();
+    return unsub;
   }, []);
 
+  // Charger les médicaments
   useEffect(() => {
-    const unsubMeds = onSnapshot(collection(db, 'medicaments'), (snapshot) => {
-      const meds: Record<string, any> = {};
-      snapshot.docs.forEach(doc => {
-        meds[doc.id] = doc.data();
+    const unsub = onSnapshot(collection(db, 'medicaments'), (snap) => {
+      const map: Record<string, any> = {};
+      snap.docs.forEach((d) => {
+        map[d.id] = { id: d.id, ...d.data() };
       });
-      setMedicaments(meds);
+      setMedicaments(map);
     });
-    return () => unsubMeds();
+    return unsub;
   }, []);
 
+  // Charger les prescriptions (dernières 50)
   useEffect(() => {
-    const q = query(collection(db, 'prescriptions'), orderBy('date_prescription', 'desc'), limit(50));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setPrescriptions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsubscribe();
+    let q;
+    try {
+      q = query(
+        collection(db, 'prescriptions'),
+        orderBy('date_prescription', 'desc'),
+        limit(50)
+      );
+    } catch {
+      q = query(collection(db, 'prescriptions'), limit(50));
+    }
+
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        // Tri de secours côté client
+        list.sort((a: any, b: any) => {
+          const da = a.date_prescription || '';
+          const db2 = b.date_prescription || '';
+          return db2.localeCompare(da);
+        });
+        setPrescriptions(list);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Erreur chargement prescriptions:', error);
+        // Fallback sans orderBy
+        const fallbackQ = query(collection(db, 'prescriptions'), limit(50));
+        onSnapshot(fallbackQ, (snap) => {
+          const list = snap.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .sort((a: any, b: any) => {
+              const da = a.date_prescription || '';
+              const db2 = b.date_prescription || '';
+              return db2.localeCompare(da);
+            });
+          setPrescriptions(list);
+          setLoading(false);
+        });
+      }
+    );
+    return unsub;
   }, []);
 
-  const filteredPrescriptions = prescriptions.filter(p => {
+  // Filtrer par recherche
+  const filtered = prescriptions.filter((p: any) => {
+    if (!searchTerm) return true;
     const patient = patients[p.patient_id];
-    const patientName = patient ? `${patient.nom} ${patient.prenom}`.toLowerCase() : '';
-    return patientName.includes(search.toLowerCase());
+    const patientName = patient
+      ? `${patient.nom || ''} ${patient.prenom || ''}`.toLowerCase()
+      : '';
+    return patientName.includes(searchTerm.toLowerCase());
   });
 
   const handleEdit = (prescription: any) => {
-    if (isAssistante) return;
     setSelectedPrescription(prescription);
-    setIsFormOpen(true);
+    setShowForm(true);
   };
 
-  const handlePrint = (e: React.MouseEvent, prescription: any) => {
-    e.stopPropagation();
-    setSelectedPrescription(prescription);
-    setIsPrintOpen(true);
+  const handlePrint = (prescription: any) => {
+    setPrintPrescription(prescription);
+    setShowPrint(true);
   };
 
-  const handleCloseForm = () => {
-    setSelectedPrescription(null);
-    setIsFormOpen(false);
-  };
+  const isAssistante = user?.role === 'assistante';
 
-  const handleClosePrint = () => {
-    setSelectedPrescription(null);
-    setIsPrintOpen(false);
-  };
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+        <span className="ml-3 text-gray-600">Chargement des ordonnances...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <div className="sm:flex sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Ordonnances</h1>
-        {!isAssistante && (
-          <div className="mt-4 sm:mt-0">
-            <button
-              onClick={() => { setSelectedPrescription(null); setIsFormOpen(true); }}
-              className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:w-auto"
-            >
-              <Plus className="-ml-1 mr-2 h-5 w-5" />
-              Nouvelle Ordonnance
-            </button>
-          </div>
-        )}
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Ordonnances</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {filtered.length} ordonnance{filtered.length > 1 ? 's' : ''}
+          </p>
+        </div>
+        {/* 
+          BOUTON "Nouvelle ordonnance" SUPPRIMÉ de cette vue.
+          La création se fait uniquement depuis Patient > Ordonnances.
+        */}
       </div>
 
-      <div className="bg-white shadow rounded-lg overflow-hidden">
-        <div className="p-4 border-b border-slate-200">
-          <div className="relative rounded-md shadow-sm max-w-md">
-            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-              <Search className="h-5 w-5 text-slate-400" />
-            </div>
-            <input
-              type="text"
-              className="block w-full rounded-md border-slate-300 pl-10 focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-2 border"
-              placeholder="Rechercher par patient..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+      {/* Barre de recherche */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+        <input
+          type="text"
+          placeholder="Rechercher par nom de patient..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+        />
+      </div>
+
+      {/* Liste des ordonnances */}
+      {filtered.length === 0 ? (
+        <div className="text-center py-12">
+          <FileText className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+          <p className="text-gray-500">Aucune ordonnance trouvée.</p>
         </div>
-
-        <ul className="divide-y divide-slate-200">
-          {filteredPrescriptions.map((prescription) => {
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((prescription: any) => {
             const patient = patients[prescription.patient_id];
-            return (
-              <li key={prescription.id} className="hover:bg-slate-50 transition-colors p-4 sm:px-6 cursor-pointer" onClick={() => handleEdit(prescription)}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-start">
-                    <div className="flex-shrink-0 mt-1">
-                      <FileSignature className="h-6 w-6 text-indigo-500" />
-                    </div>
-                    <div className="ml-4">
-                      <div className="flex items-center">
-                        <User className="mr-1.5 h-4 w-4 text-slate-400" />
-                        <Link to={`/patients/${prescription.patient_id}`} className="text-sm font-medium text-indigo-600 hover:text-indigo-900" onClick={(e) => e.stopPropagation()}>
-                          {patient ? `${patient.nom} ${patient.prenom}` : 'Patient inconnu'}
-                        </Link>
-                        <span className="mx-2 text-slate-300">|</span>
-                        <Calendar className="mr-1.5 h-4 w-4 text-slate-400" />
-                        <span className="text-sm text-slate-500">
-                          {new Date(prescription.date_prescription + 'T12:00:00').toLocaleDateString('fr-FR')}
-                        </span>
-                      </div>
+            const patientName = patient
+              ? `${patient.nom || ''} ${patient.prenom || ''}`
+              : 'Patient inconnu';
 
-                      <div className="mt-3 space-y-2">
-                        {prescription.medicaments?.map((med: any, idx: number) => {
-                          const medInfo = medicaments[med.medicament_id];
+            return (
+              <div
+                key={prescription.id}
+                className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <Link
+                        to={`/patients/${prescription.patient_id}`}
+                        className="text-base font-semibold text-indigo-600 hover:underline"
+                      >
+                        {patientName}
+                      </Link>
+                      <span className="text-xs text-gray-400">
+                        {prescription.date_prescription
+                          ? new Date(prescription.date_prescription).toLocaleDateString('fr-FR')
+                          : '—'}
+                      </span>
+                    </div>
+
+                    {/* Médicaments */}
+                    {prescription.medicaments?.length > 0 && (
+                      <div className="space-y-1">
+                        {prescription.medicaments.map((med: any, idx: number) => {
+                          const medData = medicaments[med.medicament_id];
                           return (
-                            <div key={idx} className="flex items-start text-sm">
-                              <Pill className="h-4 w-4 text-slate-400 mr-2 mt-0.5" />
-                              <div>
-                                <span className="font-medium text-slate-900">
-                                  {med.nomMedicament || (medInfo ? (medInfo.nomMedicament || medInfo.nom_commercial) : 'Médicament inconnu')}
-                                </span>
-                                <span className="text-slate-500 ml-2">
-                                  {med.posologie} - {med.duree}
-                                </span>
-                              </div>
+                            <div key={idx} className="text-sm text-gray-600">
+                              <span className="font-medium">
+                                {medData?.nomMedicament || med.nom || 'Médicament inconnu'}
+                              </span>
+                              {med.posologie && (
+                                <span className="text-gray-400 ml-2">— {med.posologie}</span>
+                              )}
+                              {med.duree && (
+                                <span className="text-gray-400 ml-1">({med.duree})</span>
+                              )}
                             </div>
                           );
                         })}
                       </div>
+                    )}
 
-                      {prescription.notes && (
-                        <div className="mt-2 text-sm text-slate-600 italic">
-                          Notes: {prescription.notes}
-                        </div>
-                      )}
-                    </div>
+                    {prescription.notes && (
+                      <p className="text-xs text-gray-400 mt-2 italic">{prescription.notes}</p>
+                    )}
                   </div>
-                  <div className="ml-4 flex-shrink-0">
+
+                  {/* Boutons d'action */}
+                  <div className="flex items-center gap-2 ml-4">
                     <button
-                      onClick={(e) => handlePrint(e, prescription)}
-                      className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm bg-indigo-100 text-indigo-700 hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                      title="Imprimer l'ordonnance"
+                      onClick={() => handlePrint(prescription)}
+                      className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                      title="Imprimer"
                     >
-                      <Printer className="h-5 w-5" />
+                      <Printer className="w-4 h-4" />
                     </button>
+                    {!isAssistante && (
+                      <button
+                        onClick={() => handleEdit(prescription)}
+                        className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        title="Modifier"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
-              </li>
+              </div>
             );
           })}
-          {filteredPrescriptions.length === 0 && (
-            <li className="px-4 py-8 text-center text-sm text-slate-500">
-              Aucune ordonnance trouvée.
-            </li>
-          )}
-        </ul>
-      </div>
+        </div>
+      )}
 
-      {isFormOpen && !isAssistante && <PrescriptionForm prescription={selectedPrescription} onClose={handleCloseForm} />}
-
-      {isPrintOpen && selectedPrescription && (
-        <PrescriptionPrintView
+      {/* Formulaire (édition uniquement, pas de création) */}
+      {showForm && (
+        <PrescriptionForm
           prescription={selectedPrescription}
-          patient={patients[selectedPrescription.patient_id]}
+          onClose={() => {
+            setShowForm(false);
+            setSelectedPrescription(null);
+          }}
+        />
+      )}
+
+      {/* Vue impression */}
+      {showPrint && printPrescription && (
+        <PrescriptionPrintView
+          prescription={printPrescription}
+          patient={patients[printPrescription.patient_id]}
           medicaments={medicaments}
-          onClose={handleClosePrint}
+          onClose={() => {
+            setShowPrint(false);
+            setPrintPrescription(null);
+          }}
         />
       )}
     </div>
   );
-}
+};
+
+export default Prescriptions;

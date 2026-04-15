@@ -1,352 +1,352 @@
 import React, { useState, useEffect } from 'react';
-import { doc, updateDoc, addDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import {
+    doc,
+    getDoc,
+    updateDoc,
+    addDoc,
+    collection,
+    query,
+    where,
+    getDocs,
+} from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../hooks/useSettings';
-import { X, ClipboardList, Save } from 'lucide-react';
-import { format } from 'date-fns';
+import { X, Save, Loader2 } from 'lucide-react';
 
 interface PreConsultationFormProps {
     entry: {
         id: string;
         patient_id: string;
-        motif?: string;
+        consultation_id?: string;
         appointment_id?: string;
     };
     patientName: string;
     onClose: () => void;
 }
 
-export default function PreConsultationForm({ entry, patientName, onClose }: PreConsultationFormProps) {
-    const { appUser } = useAuth();
+const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
+    entry,
+    patientName,
+    onClose,
+}) => {
+    const { user } = useAuth();
     const { settings } = useSettings();
     const [loading, setLoading] = useState(false);
-    const [patientData, setPatientData] = useState<any>(null);
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [patient, setPatient] = useState<any>(null);
 
-    const [formData, setFormData] = useState({
+    const [formData, setFormData] = useState<Record<string, any>>({
         poids: '',
         tension_systolique: '',
         tension_diastolique: '',
-        glycemie: '',
         temperature: '',
+        glycemie: '',
         saturation_o2: '',
         frequence_cardiaque: '',
         allergies: '',
-        observations: '',
+        observations_pre_consultation: '',
     });
 
-    // Charger les données existantes du patient
-    useEffect(() => {
-        const loadPatient = async () => {
-            try {
-                const { onSnapshot: snap } = await import('firebase/firestore');
-                const unsub = snap(doc(db, 'patients', entry.patient_id), (docSnap) => {
-                    if (docSnap.exists()) {
-                        const data = docSnap.data();
-                        setPatientData(data);
-                        setFormData((prev) => ({
-                            ...prev,
-                            allergies: data.allergies || prev.allergies,
-                            poids: data.poids || prev.poids,
-                        }));
-                    }
-                });
-                return unsub;
-            } catch (err) {
-                console.error('Erreur chargement patient:', err);
-            }
-        };
+    // Champs dynamiques depuis les settings
+    const champsPreConsultation = settings?.champs_pre_consultation?.filter(
+        (c: any) => c.actif !== false
+    ) || [
+            { nom: 'poids', label: 'Poids', unite: 'kg', type: 'number', obligatoire: false, actif: true },
+            { nom: 'tension_systolique', label: 'Tension systolique', unite: 'mmHg', type: 'number', obligatoire: false, actif: true },
+            { nom: 'tension_diastolique', label: 'Tension diastolique', unite: 'mmHg', type: 'number', obligatoire: false, actif: true },
+            { nom: 'temperature', label: 'Température', unite: '°C', type: 'number', obligatoire: false, actif: true },
+            { nom: 'glycemie', label: 'Glycémie', unite: 'g/L', type: 'number', obligatoire: false, actif: true },
+            { nom: 'saturation_o2', label: 'Saturation O₂', unite: '%', type: 'number', obligatoire: false, actif: true },
+            { nom: 'frequence_cardiaque', label: 'Fréquence cardiaque', unite: 'bpm', type: 'number', obligatoire: false, actif: true },
+        ];
 
-        // Charger pré-consult existante si reprise
-        const loadExisting = async () => {
+    // Charger données patient + consultation existante
+    useEffect(() => {
+        const loadData = async () => {
             try {
-                const today = format(new Date(), 'yyyy-MM-dd');
-                const q = query(
-                    collection(db, 'consultations'),
-                    where('patient_id', '==', entry.patient_id),
-                    where('date_consultation', '==', today)
-                );
-                const snap = await getDocs(q);
-                if (!snap.empty) {
-                    const data = snap.docs[0].data();
+                // Charger le patient
+                const patientDoc = await getDoc(doc(db, 'patients', entry.patient_id));
+                if (patientDoc.exists()) {
+                    const patientData = patientDoc.data();
+                    setPatient(patientData);
                     setFormData((prev) => ({
                         ...prev,
-                        poids: data.poids || prev.poids,
-                        tension_systolique: data.tension_systolique || (data.tension ? data.tension.split('/')[0] : '') || prev.tension_systolique,
-                        tension_diastolique: data.tension_diastolique || (data.tension ? data.tension.split('/')[1] : '') || prev.tension_diastolique,
-                        glycemie: data.glycemie || prev.glycemie,
-                        temperature: data.temperature || prev.temperature,
-                        saturation_o2: data.saturation_o2 || prev.saturation_o2,
-                        frequence_cardiaque: data.frequence_cardiaque || prev.frequence_cardiaque,
-                        allergies: data.allergies || prev.allergies,
-                        observations: data.commentaire_assistante || prev.observations,
+                        allergies: patientData.allergies || '',
+                        poids: patientData.poids || '',
                     }));
                 }
-            } catch (err) {
-                console.error('Erreur chargement consultation existante:', err);
+
+                // Chercher une consultation existante pour aujourd'hui
+                const today = new Date();
+                const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+
+                let consultationData: any = null;
+
+                // Si on a déjà un consultation_id dans l'entrée
+                if (entry.consultation_id) {
+                    const consultDoc = await getDoc(doc(db, 'consultations', entry.consultation_id));
+                    if (consultDoc.exists()) {
+                        consultationData = consultDoc.data();
+                    }
+                } else {
+                    // Chercher par patient + date
+                    const q = query(
+                        collection(db, 'consultations'),
+                        where('patient_id', '==', entry.patient_id),
+                        where('date_consultation', '>=', startOfDay.toISOString().split('T')[0]),
+                        where('date_consultation', '<=', endOfDay.toISOString().split('T')[0])
+                    );
+                    const snap = await getDocs(q);
+                    if (!snap.empty) {
+                        consultationData = snap.docs[0].data();
+                    }
+                }
+
+                // Pré-remplir avec données existantes
+                if (consultationData?.pre_consultation) {
+                    const pc = consultationData.pre_consultation;
+                    setFormData((prev) => ({
+                        ...prev,
+                        poids: pc.poids || prev.poids,
+                        tension_systolique: pc.tension_systolique || prev.tension_systolique,
+                        tension_diastolique: pc.tension_diastolique || prev.tension_diastolique,
+                        temperature: pc.temperature || prev.temperature,
+                        glycemie: pc.glycemie || prev.glycemie,
+                        saturation_o2: pc.saturation_o2 || prev.saturation_o2,
+                        frequence_cardiaque: pc.frequence_cardiaque || prev.frequence_cardiaque,
+                        allergies: pc.allergies || prev.allergies,
+                        observations_pre_consultation: pc.observations_pre_consultation || prev.observations_pre_consultation,
+                    }));
+                }
+            } catch (error) {
+                console.error('Erreur chargement données pré-consultation:', error);
+            } finally {
+                setInitialLoading(false);
             }
         };
+        loadData();
+    }, [entry.patient_id, entry.consultation_id]);
 
-        loadPatient();
-        loadExisting();
-    }, [entry.patient_id]);
-
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        setFormData({ ...formData, [e.target.name]: e.target.value });
+    const handleChange = (field: string, value: any) => {
+        setFormData((prev) => ({ ...prev, [field]: value }));
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
+
         try {
-            const now = new Date();
-            const today = format(now, 'yyyy-MM-dd');
-            const tension = formData.tension_systolique && formData.tension_diastolique
-                ? `${formData.tension_systolique}/${formData.tension_diastolique}`
-                : '';
+            // Construire la tension combinée pour rétrocompatibilité
+            const tensionStr =
+                formData.tension_systolique && formData.tension_diastolique
+                    ? `${formData.tension_systolique}/${formData.tension_diastolique}`
+                    : '';
 
-            // Chercher consultation existante
-            const qConsult = query(
-                collection(db, 'consultations'),
-                where('patient_id', '==', entry.patient_id),
-                where('date_consultation', '==', today)
-            );
-            const snapConsult = await getDocs(qConsult);
-
-            const preConsultData = {
-                poids: formData.poids,
-                tension,
-                tension_systolique: formData.tension_systolique,
-                tension_diastolique: formData.tension_diastolique,
-                glycemie: formData.glycemie,
-                temperature: formData.temperature,
-                saturation_o2: formData.saturation_o2,
-                frequence_cardiaque: formData.frequence_cardiaque,
-                allergies: formData.allergies,
-                commentaire_assistante: formData.observations,
-                statutConsultation: 'pre_consultation',
-                motif: entry.motif || '',
-                updated_at: now.toISOString(),
-                updated_by: appUser?.uid,
+            const preConsultPayload: Record<string, any> = {
+                poids: formData.poids ? parseFloat(formData.poids) : null,
+                tension_systolique: formData.tension_systolique ? parseFloat(formData.tension_systolique) : null,
+                tension_diastolique: formData.tension_diastolique ? parseFloat(formData.tension_diastolique) : null,
+                tension: tensionStr,
+                temperature: formData.temperature ? parseFloat(formData.temperature) : null,
+                glycemie: formData.glycemie ? parseFloat(formData.glycemie) : null,
+                saturation_o2: formData.saturation_o2 ? parseFloat(formData.saturation_o2) : null,
+                frequence_cardiaque: formData.frequence_cardiaque ? parseFloat(formData.frequence_cardiaque) : null,
+                allergies: formData.allergies || '',
+                observations_pre_consultation: formData.observations_pre_consultation || '',
+                realise_par: user?.uid || '',
+                realise_par_nom: user?.name || '',
+                date_realisation: new Date().toISOString(),
             };
 
-            let consultationId: string;
-            if (!snapConsult.empty) {
-                consultationId = snapConsult.docs[0].id;
-                await updateDoc(doc(db, 'consultations', consultationId), preConsultData);
-            } else {
-                const newDoc = await addDoc(collection(db, 'consultations'), {
-                    ...preConsultData,
-                    patient_id: entry.patient_id,
-                    date_consultation: today,
-                    file_attente_id: entry.id,
-                    created_by: appUser?.uid || 'unknown',
-                    created_at: now.toISOString(),
-                });
-                consultationId = newDoc.id;
-            }
-
-            // Mettre à jour le patient
-            await updateDoc(doc(db, 'patients', entry.patient_id), {
-                allergies: formData.allergies,
-                poids: formData.poids,
-                updated_at: now.toISOString(),
+            // Ajouter les champs dynamiques supplémentaires
+            champsPreConsultation.forEach((champ: any) => {
+                if (formData[champ.nom] !== undefined && preConsultPayload[champ.nom] === undefined) {
+                    preConsultPayload[champ.nom] =
+                        champ.type === 'number' && formData[champ.nom]
+                            ? parseFloat(formData[champ.nom])
+                            : formData[champ.nom] || null;
+                }
             });
 
-            // Mettre à jour la file d'attente : stocker pré-consult + consultation_id
+            const today = new Date().toISOString().split('T')[0];
+
+            let consultationId = entry.consultation_id;
+
+            if (consultationId) {
+                // Mettre à jour la consultation existante
+                await updateDoc(doc(db, 'consultations', consultationId), {
+                    pre_consultation: preConsultPayload,
+                    poids: preConsultPayload.poids,
+                    tension: tensionStr,
+                    statut: 'pre_consultation',
+                    updated_at: new Date().toISOString(),
+                });
+            } else {
+                // Créer une nouvelle consultation
+                const newConsult = await addDoc(collection(db, 'consultations'), {
+                    patient_id: entry.patient_id,
+                    date_consultation: today,
+                    pre_consultation: preConsultPayload,
+                    poids: preConsultPayload.poids,
+                    tension: tensionStr,
+                    statut: 'pre_consultation',
+                    allergies: formData.allergies,
+                    created_by: user?.uid || '',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                });
+                consultationId = newConsult.id;
+            }
+
+            // Mettre à jour le patient (poids + allergies)
+            const patientUpdate: Record<string, any> = {
+                updated_at: new Date().toISOString(),
+            };
+            if (preConsultPayload.poids) patientUpdate.poids = preConsultPayload.poids;
+            if (formData.allergies) patientUpdate.allergies = formData.allergies;
+
+            await updateDoc(doc(db, 'patients', entry.patient_id), patientUpdate);
+
+            // Mettre à jour l'entrée file d'attente
             await updateDoc(doc(db, 'file_attente', entry.id), {
                 consultation_id: consultationId,
-                pre_consultation: {
-                    poids: formData.poids,
-                    tension,
-                    glycemie: formData.glycemie,
-                    temperature: formData.temperature,
-                    saturation_o2: formData.saturation_o2,
-                    frequence_cardiaque: formData.frequence_cardiaque,
-                    allergies: formData.allergies,
-                    observations: formData.observations,
-                    effectuee_par: appUser?.uid,
-                    effectuee_at: now.toISOString(),
-                },
-                heure_fin_pre_consultation: now.toISOString(),
-                updated_at: now.toISOString(),
+                pre_consultation: preConsultPayload,
+                statut: 'pre_consultation_terminee',
+                updated_at: new Date().toISOString(),
             });
 
             onClose();
         } catch (error) {
             console.error('Erreur sauvegarde pré-consultation:', error);
-            alert('Erreur lors de l\'enregistrement de la pré-consultation.');
+            alert('Erreur lors de la sauvegarde. Veuillez réessayer.');
         } finally {
             setLoading(false);
         }
     };
 
-    // Déterminer les champs dynamiques depuis les settings
-    const dynamicFields = settings.champs_pre_consultation || [];
-    const showField = (fieldName: string) =>
-        dynamicFields.length === 0 || dynamicFields.some((f: any) => (typeof f === 'string' ? f : f.nom) === fieldName);
+    // Fonction utilitaire : construire le label SANS duplication d'unité
+    const buildLabel = (champ: any): string => {
+        if (!champ.unite) return champ.label;
+        // Si le label contient déjà l'unité entre parenthèses, ne pas la rajouter
+        if (champ.label.includes(`(${champ.unite})`)) return champ.label;
+        return `${champ.label} (${champ.unite})`;
+    };
+
+    if (initialLoading) {
+        return (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white rounded-xl p-8 flex items-center gap-3">
+                    <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+                    <span>Chargement...</span>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div className="fixed inset-0 bg-slate-900/50 z-50 overflow-y-auto flex justify-center items-start p-4 sm:p-6">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg my-8 relative">
-                <div className="flex justify-between items-center p-6 border-b border-slate-200 sticky top-0 bg-white z-10 rounded-t-xl">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                {/* Header */}
+                <div className="flex items-center justify-between p-6 border-b">
                     <div>
-                        <h2 className="text-xl font-semibold text-slate-900 flex items-center">
-                            <ClipboardList className="h-5 w-5 mr-2 text-yellow-600" />
-                            Pré-consultation
-                        </h2>
-                        <p className="text-sm text-slate-500 mt-1">{patientName}</p>
-                        {entry.motif && <p className="text-xs text-indigo-600 mt-0.5">Motif : {entry.motif}</p>}
+                        <h2 className="text-xl font-bold text-gray-900">Pré-consultation</h2>
+                        <p className="text-sm text-gray-500 mt-1">{patientName}</p>
                     </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-500">
-                        <X className="h-6 w-6" />
+                    <button
+                        onClick={onClose}
+                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    >
+                        <X className="w-5 h-5" />
                     </button>
                 </div>
 
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                    <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                        <h4 className="text-sm font-semibold text-yellow-900 mb-3">Constantes vitales</h4>
+                {/* Formulaire */}
+                <form onSubmit={handleSubmit} className="p-6 space-y-6">
+                    {/* Constantes vitales dynamiques */}
+                    <div>
+                        <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">
+                            Constantes vitales
+                        </h3>
                         <div className="grid grid-cols-2 gap-4">
-                            {showField('poids') && (
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700">Poids (kg)</label>
+                            {champsPreConsultation.map((champ: any) => (
+                                <div key={champ.nom}>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        {buildLabel(champ)}
+                                    </label>
                                     <input
-                                        type="number"
-                                        step="0.1"
-                                        name="poids"
-                                        value={formData.poids}
-                                        onChange={handleChange}
-                                        placeholder="75.5"
-                                        className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
+                                        type={champ.type === 'number' ? 'number' : 'text'}
+                                        step={champ.type === 'number' ? '0.1' : undefined}
+                                        value={formData[champ.nom] || ''}
+                                        onChange={(e) => handleChange(champ.nom, e.target.value)}
+                                        placeholder={champ.unite || ''}
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                                     />
                                 </div>
-                            )}
-                            {showField('tension') && (
-                                <>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700">Tension systolique</label>
-                                        <input
-                                            type="number"
-                                            name="tension_systolique"
-                                            value={formData.tension_systolique}
-                                            onChange={handleChange}
-                                            placeholder="12"
-                                            className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700">Tension diastolique</label>
-                                        <input
-                                            type="number"
-                                            name="tension_diastolique"
-                                            value={formData.tension_diastolique}
-                                            onChange={handleChange}
-                                            placeholder="8"
-                                            className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
-                                        />
-                                    </div>
-                                </>
-                            )}
-                            {showField('temperature') && (
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700">Température (°C)</label>
-                                    <input
-                                        type="number"
-                                        step="0.1"
-                                        name="temperature"
-                                        value={formData.temperature}
-                                        onChange={handleChange}
-                                        placeholder="37.0"
-                                        className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
-                                    />
-                                </div>
-                            )}
-                            {showField('glycemie') && (
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700">Glycémie (g/L)</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        name="glycemie"
-                                        value={formData.glycemie}
-                                        onChange={handleChange}
-                                        placeholder="1.0"
-                                        className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
-                                    />
-                                </div>
-                            )}
-                            {showField('saturation_o2') && (
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700">Saturation O2 (%)</label>
-                                    <input
-                                        type="number"
-                                        name="saturation_o2"
-                                        value={formData.saturation_o2}
-                                        onChange={handleChange}
-                                        placeholder="98"
-                                        className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
-                                    />
-                                </div>
-                            )}
-                            {showField('frequence_cardiaque') && (
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700">Fréq. cardiaque (bpm)</label>
-                                    <input
-                                        type="number"
-                                        name="frequence_cardiaque"
-                                        value={formData.frequence_cardiaque}
-                                        onChange={handleChange}
-                                        placeholder="72"
-                                        className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
-                                    />
-                                </div>
-                            )}
+                            ))}
                         </div>
                     </div>
 
+                    {/* Allergies */}
                     <div>
-                        <label className="block text-sm font-medium text-slate-700">Allergies</label>
+                        <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">
+                            Allergies
+                        </h3>
                         <input
                             type="text"
-                            name="allergies"
                             value={formData.allergies}
-                            onChange={handleChange}
-                            placeholder="Pénicilline, Arachides..."
-                            className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2"
+                            onChange={(e) => handleChange('allergies', e.target.value)}
+                            placeholder="Allergies connues..."
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                         />
                     </div>
 
+                    {/* Observations pré-consultation */}
                     <div>
-                        <label className="block text-sm font-medium text-slate-700">Observations pré-consultation</label>
+                        <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">
+                            Observations pré-consultation
+                        </h3>
                         <textarea
-                            name="observations"
+                            value={formData.observations_pre_consultation}
+                            onChange={(e) => handleChange('observations_pre_consultation', e.target.value)}
+                            placeholder="Observations, remarques de l'assistante..."
                             rows={3}
-                            value={formData.observations}
-                            onChange={handleChange}
-                            placeholder="Patient à jeun, anxieux, accompagné par..."
-                            className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2"
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                         />
                     </div>
 
-                    <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
+                    {/* Boutons */}
+                    <div className="flex justify-end gap-3 pt-4 border-t">
                         <button
                             type="button"
                             onClick={onClose}
-                            className="px-4 py-2 border border-slate-300 rounded-md shadow-sm text-sm font-medium text-slate-700 bg-white hover:bg-slate-50"
+                            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
                         >
                             Annuler
                         </button>
                         <button
                             type="submit"
                             disabled={loading}
-                            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50"
+                            className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2"
                         >
-                            <Save className="h-4 w-4 mr-2" />
-                            {loading ? 'Enregistrement...' : 'Enregistrer la pré-consultation'}
+                            {loading ? (
+                                <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Enregistrement...
+                                </>
+                            ) : (
+                                <>
+                                    <Save className="w-4 h-4" />
+                                    Enregistrer
+                                </>
+                            )}
                         </button>
                     </div>
                 </form>
             </div>
         </div>
     );
-}
+};
+
+export default PreConsultationForm;

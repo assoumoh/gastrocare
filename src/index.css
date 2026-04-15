@@ -4,13 +4,67 @@
   body * {
     visibility: hidden;
   }
-  #printable-prescription, #printable-prescription * {
+
+  #printable-prescription,
+  #printable-prescription * {
     visibility: visible;
   }
+
   #printable-prescription {
     position: absolute;
     left: 0;
     top: 0;
     width: 100%;
+  }
+}
+
+/* ====== Styles d'impression globaux ====== */
+@media print {
+
+  /* Masquer tout sauf la zone imprimable */
+  body>* {
+    visibility: hidden;
+  }
+
+  /* Classes Tailwind print: supportées nativement, mais on renforce ici */
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .print\:block {
+    display: block !important;
+    visibility: visible !important;
+  }
+
+  /* Zone d'impression positionnée en pleine page */
+  #exam-print-area,
+  .print-area {
+    visibility: visible !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    z-index: 9999;
+    background: white;
+  }
+
+  #exam-print-area *,
+  .print-area * {
+    visibility: visible !important;
+  }
+
+  /* Masquer les modales/overlays */
+  .fixed {
+    position: absolute !important;
+    background: transparent !important;
+  }
+
+  /* Pas de coupure dans les tableaux */
+  table {
+    page-break-inside: avoid;
+  }
+
+  tr {
+    page-break-inside: avoid;
   }
 }
