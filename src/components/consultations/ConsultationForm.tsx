@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, addDoc, updateDoc, doc, query, onSnapshot, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../hooks/useSettings';
-import { X, Sparkles } from 'lucide-react';
+import { X, Sparkles, FlaskConical, Pill } from 'lucide-react';
 import { aiService } from '../../services/aiService';
 import type { ChampPreConsultation } from '../../types';
+import ExamRequestModal from '../salle-attente/ExamRequestModal';
+import PrescriptionForm from '../prescriptions/PrescriptionForm';
 
 interface ConsultationFormProps {
   consultation?: any;
@@ -23,7 +25,12 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
   const [patients, setPatients] = useState<any[]>([]);
   const [notesBrutes, setNotesBrutes] = useState('');
 
-  // Champs pré-consultation dynamiques depuis Settings
+  // *** Workflow post-consultation ***
+  const [postSaveStep, setPostSaveStep] = useState<'none' | 'ask_exams' | 'exams' | 'ask_prescription' | 'prescription'>('none');
+  const [savedConsultationId, setSavedConsultationId] = useState<string | null>(null);
+  const [savedPatientId, setSavedPatientId] = useState<string>('');
+  const [savedPatientName, setSavedPatientName] = useState<string>('');
+
   const champsPreConsult = useMemo(() => {
     if (settings?.champs_pre_consultation && Array.isArray(settings.champs_pre_consultation)) {
       return [...settings.champs_pre_consultation]
@@ -37,7 +44,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
     ];
   }, [settings]);
 
-  // Initialisation du formData avec rétro-compatibilité poids/tension
   const buildInitialFormData = () => {
     const base: Record<string, any> = {
       patient_id: consultation?.patient_id || patientId || '',
@@ -59,7 +65,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
       file_attente_id: consultation?.file_attente_id || fileAttenteId || '',
     };
 
-    // Initialiser les champs dynamiques
     champsPreConsult.forEach((champ) => {
       const key = `pre_${champ.id}`;
       if (consultation?.pre_consultation_data?.[champ.id] !== undefined) {
@@ -71,11 +76,9 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
       }
     });
 
-    // Rétro-compat : ancien champ poids → pre_poids
     if (!base['pre_poids'] && consultation?.poids) {
       base['pre_poids'] = consultation.poids;
     }
-    // Rétro-compat : ancien champ tension "12/8" → pre_tension_systolique / pre_tension_diastolique
     if (!base['pre_tension_systolique'] && consultation?.tension) {
       const parts = String(consultation.tension).split('/');
       if (parts.length === 2) {
@@ -93,11 +96,10 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
     const q = query(collection(db, 'patients'), orderBy('nom'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const pts = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as any))
+        .map(d => ({ id: d.id, ...d.data() } as any))
         .filter((p: any) => !p.deleted && !p.supprime);
       setPatients(pts);
 
-      // If creating a new consultation and patient is selected, pre-fill allergies
       if (!consultation?.id && (consultation?.patient_id || patientId)) {
         const pId = consultation?.patient_id || patientId;
         const p = pts.find((pt: any) => pt.id === pId);
@@ -141,7 +143,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
     }
   };
 
-  // Construire l'objet pre_consultation_data depuis les champs dynamiques
   const buildPreConsultationData = (): Record<string, any> => {
     const data: Record<string, any> = {};
     champsPreConsult.forEach((champ) => {
@@ -153,7 +154,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
     return data;
   };
 
-  // Extraire poids et tension depuis les champs dynamiques pour rétro-compat
   const extractLegacyFields = () => {
     const preData = buildPreConsultationData();
     const legacy: Record<string, any> = {};
@@ -163,6 +163,12 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
     if (sys && dia) legacy.tension = `${sys}/${dia}`;
     else if (sys) legacy.tension = String(sys);
     return legacy;
+  };
+
+  // Récupérer le nom du patient pour le workflow
+  const getPatientName = (pId: string): string => {
+    const p = patients.find((pt: any) => pt.id === pId);
+    return p ? `${p.nom || ''} ${p.prenom || ''}`.trim() : 'Patient';
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -194,13 +200,11 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
           poids: legacyFields.poids ?? formData.poids,
           tension: legacyFields.tension ?? formData.tension,
         };
-        // Nettoyer les champs pre_ temporaires du save
         Object.keys(dataToSave).forEach(key => {
           if (key.startsWith('pre_')) delete dataToSave[key];
         });
       }
 
-      // File attente ID
       const faId = formData.file_attente_id || fileAttenteId;
       if (faId) {
         dataToSave.file_attente_id = faId;
@@ -208,7 +212,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
 
       let consultationDocId: string;
 
-      // Update consultation document
       if (consultation?.id) {
         consultationDocId = consultation.id;
         await updateDoc(doc(db, 'consultations', consultation.id), {
@@ -228,7 +231,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
         consultationDocId = docRef.id;
       }
 
-      // Update patient document with latest allergies and poids
       if (formData.patient_id) {
         try {
           const patientUpdate: Record<string, any> = { updated_at: now };
@@ -240,7 +242,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
         }
       }
 
-      // Liaison file_attente
       if (faId) {
         try {
           await updateDoc(doc(db, 'file_attente', faId), {
@@ -249,11 +250,21 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
             updated_at: now,
           });
         } catch (err) {
-          console.warn('Impossible de mettre à jour la file d\'attente:', err);
+          console.warn("Impossible de mettre à jour la file d'attente:", err);
         }
       }
 
-      onClose();
+      // *** WORKFLOW POST-CONSULTATION ***
+      // Si le statut est "terminée" et que c'est un médecin → proposer examens/ordonnance
+      if (formData.statutConsultation === 'terminee' && appUser?.role !== 'assistante') {
+        setSavedConsultationId(consultationDocId);
+        setSavedPatientId(formData.patient_id);
+        setSavedPatientName(getPatientName(formData.patient_id));
+        setPostSaveStep('ask_exams');
+      } else {
+        onClose();
+      }
+
     } catch (error) {
       console.error("Error saving consultation:", error);
       alert("Erreur lors de l'enregistrement de la consultation.");
@@ -262,6 +273,103 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
     }
   };
 
+  // *** RENDU WORKFLOW POST-CONSULTATION ***
+
+  // Étape 1: Demander examens ? Oui/Non
+  if (postSaveStep === 'ask_exams') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black/50" />
+        <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6 z-50">
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">Consultation enregistrée</h3>
+          <p className="text-sm text-slate-500 mb-6">{savedPatientName}</p>
+
+          <div className="flex items-center gap-3 mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <FlaskConical className="w-6 h-6 text-amber-600 flex-shrink-0" />
+            <p className="text-sm text-amber-800 font-medium">
+              Souhaitez-vous demander des examens complémentaires ?
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => setPostSaveStep('ask_prescription')}
+              className="flex-1 px-4 py-3 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Non, passer
+            </button>
+            <button
+              onClick={() => setPostSaveStep('exams')}
+              className="flex-1 px-4 py-3 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700"
+            >
+              Oui, demander
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Étape 2: Formulaire examens
+  if (postSaveStep === 'exams' && savedConsultationId) {
+    return (
+      <ExamRequestModal
+        patientId={savedPatientId}
+        patientName={savedPatientName}
+        consultationId={savedConsultationId}
+        onComplete={() => setPostSaveStep('ask_prescription')}
+        onClose={() => setPostSaveStep('ask_prescription')}
+      />
+    );
+  }
+
+  // Étape 3: Demander ordonnance ? Oui/Non
+  if (postSaveStep === 'ask_prescription') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black/50" />
+        <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6 z-50">
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">Ordonnance</h3>
+          <p className="text-sm text-slate-500 mb-6">{savedPatientName}</p>
+
+          <div className="flex items-center gap-3 mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+            <Pill className="w-6 h-6 text-indigo-600 flex-shrink-0" />
+            <p className="text-sm text-indigo-800 font-medium">
+              Souhaitez-vous rédiger une ordonnance ?
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-3 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Non, terminer
+            </button>
+            <button
+              onClick={() => setPostSaveStep('prescription')}
+              className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+            >
+              Oui, prescrire
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Étape 4: Formulaire ordonnance
+  if (postSaveStep === 'prescription') {
+    return (
+      <PrescriptionForm
+        patientIdProp={savedPatientId}
+        consultationIdProp={savedConsultationId || undefined}
+        onClose={onClose}
+      />
+    );
+  }
+
+  // *** FORMULAIRE PRINCIPAL (inchangé) ***
   return (
     <div className="fixed inset-0 bg-slate-900/50 z-50 overflow-y-auto flex justify-center items-start p-4 sm:p-6">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl my-8 relative">
@@ -271,9 +379,7 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
               {consultation ? 'Modifier la consultation' : 'Nouvelle consultation'}
             </h2>
             {formData.file_attente_id && (
-              <p className="text-xs text-indigo-500 mt-0.5">
-                Liée à la file d'attente
-              </p>
+              <p className="text-xs text-indigo-500 mt-0.5">Liée à la file d'attente</p>
             )}
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-500">
@@ -283,7 +389,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
 
         <div className={`p-6 grid grid-cols-1 ${appUser?.role !== 'assistante' ? 'lg:grid-cols-3' : ''} gap-6`}>
 
-          {/* AI Assistant Sidebar (Hidden for assistante) */}
           {appUser?.role !== 'assistante' && (
             <div className="lg:col-span-1 border-r border-slate-200 pr-6 space-y-4">
               <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-100">
@@ -298,7 +403,7 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
                   rows={6}
                   value={notesBrutes}
                   onChange={(e) => setNotesBrutes(e.target.value)}
-                  placeholder="Ex: Patient 45 ans, dlr fosse iliaque dte depuis 2j, fievre 38.5, pas de N/V. Abdo souple mais sensible FID. Faire echo abdo + NFS CRP."
+                  placeholder="Ex: Patient 45 ans, dlr fosse iliaque dte depuis 2j, fievre 38.5, pas de N/V..."
                   className="block w-full rounded-md border-indigo-200 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 bg-white"
                 />
                 <button
@@ -313,7 +418,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
             </div>
           )}
 
-          {/* Main Form */}
           <form onSubmit={handleSubmit} className={`${appUser?.role !== 'assistante' ? 'lg:col-span-2' : ''} space-y-4`}>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -347,7 +451,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
               </div>
             </div>
 
-            {/* Pre-consultation fields — DYNAMIQUES depuis Settings */}
             <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
               <h4 className="text-sm font-semibold text-slate-900 mb-2">Pré-consultation (Assistante)</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -356,42 +459,27 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
                     <label className="block text-sm font-medium text-slate-700">
                       {champ.label} {champ.unite && <span className="text-slate-400">({champ.unite})</span>}
                     </label>
-                    {champ.type === 'text' ? (
-                      <input
-                        type="text"
-                        name={`pre_${champ.id}`}
-                        value={formData[`pre_${champ.id}`] || ''}
-                        onChange={handleChange}
-                        className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
-                      />
-                    ) : (
-                      <input
-                        type="number"
-                        step="any"
-                        name={`pre_${champ.id}`}
-                        value={formData[`pre_${champ.id}`] || ''}
-                        onChange={handleChange}
-                        className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
-                      />
-                    )}
+                    <input
+                      type={champ.type === 'text' ? 'text' : 'number'}
+                      step={champ.type === 'number' ? 'any' : undefined}
+                      name={`pre_${champ.id}`}
+                      value={formData[`pre_${champ.id}`] || ''}
+                      onChange={handleChange}
+                      className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white"
+                    />
                   </div>
                 ))}
               </div>
-
-              {/* Allergies — toujours affiché */}
               <div>
                 <label className="block text-sm font-medium text-slate-700">Allergies</label>
                 <input type="text" name="allergies" value={formData.allergies} onChange={handleChange} placeholder="Ex: Pénicilline, Arachides..." className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white" />
               </div>
-
-              {/* Commentaire assistante */}
               <div>
                 <label className="block text-sm font-medium text-slate-700">Observations Pré-consultation</label>
                 <textarea name="commentaire_assistante" rows={2} value={formData.commentaire_assistante} onChange={handleChange} placeholder="Ex: Patient à jeun, anxieux..." className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 bg-white" />
               </div>
             </div>
 
-            {/* Medical fields (Hidden for assistante) */}
             {appUser?.role !== 'assistante' && (
               <>
                 <div className="pt-4 border-t border-slate-200">
@@ -401,42 +489,34 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
                   <label className="block text-sm font-medium text-slate-700">Motif</label>
                   <input type="text" name="motif" value={formData.motif} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-slate-700">Symptômes</label>
                   <textarea name="symptomes" rows={2} value={formData.symptomes} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-slate-700">Examen clinique</label>
                   <textarea name="examen_clinique" rows={2} value={formData.examen_clinique} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-slate-700">Diagnostic principal</label>
                   <input type="text" name="diagnostic_principal" value={formData.diagnostic_principal} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-slate-700">Synthèse</label>
                   <textarea name="synthese" rows={2} value={formData.synthese} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-slate-700">Conduite à tenir</label>
                   <textarea name="conduite_a_tenir" rows={2} value={formData.conduite_a_tenir} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-slate-700">Prescription</label>
                   <textarea name="prescription" rows={2} value={formData.prescription} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-slate-700">Observations</label>
                   <textarea name="observations" rows={2} value={formData.observations} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-slate-700">Notes (Générées par l'IA ou manuelles)</label>
                   <textarea name="notes" rows={4} value={formData.notes} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 font-mono text-xs" />
