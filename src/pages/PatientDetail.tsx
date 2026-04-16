@@ -8,7 +8,6 @@ import {
   Edit,
   User,
   FileText,
-  Calendar,
   CreditCard,
   Stethoscope,
   Pill,
@@ -21,9 +20,11 @@ import PatientConsultations from '../components/patients/PatientConsultations';
 import PatientPrescriptions from '../components/patients/PatientPrescriptions';
 import PatientExams from '../components/patients/PatientExams';
 import PatientDocuments from '../components/patients/PatientDocuments';
-import PatientPayments from '../components/patients/PatientPayments';
+import PatientFinance from '../components/patients/PatientFinance';
 
-// Onglets pour chaque rôle
+// ============================================================
+//  Onglets par rôle
+// ============================================================
 const MEDECIN_TABS = [
   { id: 'info', label: 'Informations', icon: User },
   { id: 'consultations', label: 'Consultations', icon: Stethoscope },
@@ -40,6 +41,9 @@ const ASSISTANTE_TABS = [
   { id: 'finance', label: 'Paiements', icon: CreditCard },
 ];
 
+// ============================================================
+//  Composant principal
+// ============================================================
 const PatientDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -81,7 +85,6 @@ const PatientDetail: React.FC = () => {
   useEffect(() => {
     const requestedTab = searchParams.get('tab');
     if (requestedTab) {
-      // Mapper les noms d'URL aux IDs d'onglet
       const tabMap: Record<string, string> = {
         info: 'info',
         informations: 'info',
@@ -95,7 +98,6 @@ const PatientDetail: React.FC = () => {
         finance: 'finance',
       };
       const mappedTab = tabMap[requestedTab.toLowerCase()] || requestedTab;
-      // Vérifier que l'onglet est disponible pour le rôle
       if (tabs.some((t) => t.id === mappedTab)) {
         setActiveTab(mappedTab);
       }
@@ -134,7 +136,6 @@ const PatientDetail: React.FC = () => {
     );
   }
 
-  // Alerte patient supprimé (soft delete)
   const isDeleted = patient.actif === false || patient.deleted;
 
   return (
@@ -168,7 +169,7 @@ const PatientDetail: React.FC = () => {
         </button>
       </div>
 
-      {/* Section pré-consultation (visible par tous) */}
+      {/* Section pré-consultation */}
       <div className="bg-white rounded-xl border p-4">
         <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">
           Informations pré-consultation
@@ -280,7 +281,7 @@ const PatientDetail: React.FC = () => {
         {activeTab === 'exams' && id && <PatientExams patientId={id} />}
         {activeTab === 'prescriptions' && id && <PatientPrescriptions patientId={id} />}
         {activeTab === 'documents' && id && <PatientDocuments patientId={id} />}
-        {activeTab === 'finance' && id && <PatientPayments patientId={id} />}
+        {activeTab === 'finance' && id && <PatientFinance patientId={id} />}
       </div>
 
       {/* Formulaire édition patient */}
