@@ -7,8 +7,6 @@ import {
     addDoc,
     updateDoc,
     doc,
-    getDocs,
-    orderBy,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { format } from 'date-fns';
@@ -27,14 +25,15 @@ import {
     UserPlus,
     Stethoscope,
     ArrowRight,
-    Loader2,
     ClipboardList,
+    CheckSquare,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../hooks/useSettings';
 import PreConsultationForm from '../components/salle-attente/PreConsultationForm';
-// *** CHANGEMENT : Import direct de PostConsultationModal, PAS PostConsultationFlow ***
 import PostConsultationModal from '../components/salle-attente/PostConsultationModal';
+import ExamRequestModal from '../components/salle-attente/ExamRequestModal';
+import PrescriptionForm from '../components/prescriptions/PrescriptionForm';
 
 const STATUT_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
     en_attente: { label: 'En attente', color: 'bg-yellow-100 text-yellow-800', icon: Clock },
@@ -51,10 +50,9 @@ const PRIORITE_CONFIG: Record<string, { label: string; color: string }> = {
     prioritaire: { label: 'Prioritaire', color: 'bg-red-100 text-red-700' },
 };
 
-const STATUT_FLOW = ['en_attente', 'en_pre_consultation', 'pre_consultation_terminee', 'en_consultation', 'termine'];
-
 const SalleAttente: React.FC = () => {
-    const { user } = useAuth();
+    // *** FIX: appUser au lieu de user ***
+    const { appUser } = useAuth();
     const { settings } = useSettings();
     const navigate = useNavigate();
 
@@ -70,6 +68,10 @@ const SalleAttente: React.FC = () => {
     const [walkInMotif, setWalkInMotif] = useState('');
     const [preConsultTarget, setPreConsultTarget] = useState<any>(null);
     const [postConsultTarget, setPostConsultTarget] = useState<any>(null);
+
+    // Workflow post-consultation (Reg 5)
+    const [workflowStep, setWorkflowStep] = useState<'idle' | 'exams' | 'prescription' | 'checklist'>('idle');
+    const [workflowData, setWorkflowData] = useState<any>(null);
 
     const today = format(new Date(), 'yyyy-MM-dd');
 
@@ -106,16 +108,16 @@ const SalleAttente: React.FC = () => {
         return unsub;
     }, []);
 
-    // Listener rendez-vous du jour
+    // *** FIX Reg 1: Utiliser date_rdv au lieu de date ***
     useEffect(() => {
         const q = query(
             collection(db, 'appointments'),
-            where('date', '==', today)
+            where('date_rdv', '==', today)
         );
         const unsub = onSnapshot(q, (snap) => {
             const list = snap.docs
                 .map((d) => ({ id: d.id, ...d.data() }))
-                .sort((a: any, b: any) => (a.heure || '').localeCompare(b.heure || ''));
+                .sort((a: any, b: any) => (a.heure_rdv || a.heure || '').localeCompare(b.heure_rdv || b.heure || ''));
             setTodayAppointments(list);
         });
         return unsub;
@@ -131,7 +133,10 @@ const SalleAttente: React.FC = () => {
             (a: any) =>
                 !appointmentIdsInQueue.has(a.id) &&
                 a.statut !== 'annulé' &&
-                a.statut !== 'réalisé'
+                a.statut !== 'réalisé' &&
+                a.statut !== 'en_salle' &&
+                a.statut !== 'en_consultation' &&
+                a.statut !== 'en_pre_consultation'
         );
     }, [todayAppointments, appointmentIdsInQueue]);
 
@@ -151,11 +156,12 @@ const SalleAttente: React.FC = () => {
         return entries.filter((e: any) => ['termine', 'annule'].includes(e.statut));
     }, [entries]);
 
+    // *** FIX Reg 3: Stats séparées pour En attente / Prêts ***
     const stats = useMemo(() => {
-        const s = { total: entries.length, enAttente: 0, enConsultation: 0, termines: 0 };
+        const s = { total: entries.length, enAttente: 0, prets: 0, enConsultation: 0, termines: 0 };
         entries.forEach((e: any) => {
-            if (e.statut === 'en_attente' || e.statut === 'en_pre_consultation' || e.statut === 'pre_consultation_terminee')
-                s.enAttente++;
+            if (e.statut === 'en_attente' || e.statut === 'en_pre_consultation') s.enAttente++;
+            else if (e.statut === 'pre_consultation_terminee') s.prets++;
             else if (e.statut === 'en_consultation') s.enConsultation++;
             else if (e.statut === 'termine') s.termines++;
         });
@@ -197,18 +203,7 @@ const SalleAttente: React.FC = () => {
         }
     };
 
-    const handleMarkReady = async (entry: any) => {
-        try {
-            await updateDoc(doc(db, 'file_attente', entry.id), {
-                statut: 'pre_consultation_terminee',
-                updated_at: new Date().toISOString(),
-            });
-        } catch (err) {
-            console.error(err);
-            setError('Erreur lors du changement de statut.');
-        }
-    };
-
+    // *** FIX Reg 4: Naviguer vers l'onglet consultations avec consultationMode=active ***
     const handleStartConsultation = async (entry: any) => {
         try {
             await updateDoc(doc(db, 'file_attente', entry.id), {
@@ -221,24 +216,53 @@ const SalleAttente: React.FC = () => {
                     statut: 'en_consultation',
                 });
             }
-            navigate(`/patients/${entry.patient_id}?consultationMode=active`);
+            // Naviguer vers patient avec tab=consultations ET consultationMode=active
+            navigate(`/patients/${entry.patient_id}?tab=consultations&consultationMode=active`);
         } catch (err) {
             console.error(err);
             setError('Erreur lors du démarrage de la consultation.');
         }
     };
 
+    // *** FIX Reg 5: Workflow Terminer → Examens → Ordonnance → Checklist ***
     const handleTerminate = (entry: any) => {
         const patientData = patientsMap[entry.patient_id];
-        setPostConsultTarget({
+        const data = {
             entryId: entry.id,
             patientName: patientData
-                ? `${patientData.nom || ''} ${patientData.prenom || ''}`
+                ? `${patientData.nom || ''} ${patientData.prenom || ''}`.trim()
                 : 'Patient',
             appointmentId: entry.appointment_id,
             patientId: entry.patient_id,
             consultationId: entry.consultation_id,
-        });
+        };
+        setWorkflowData(data);
+        setWorkflowStep('exams');
+    };
+
+    const handleExamComplete = () => {
+        // Après examens → proposer ordonnance
+        setWorkflowStep('prescription');
+    };
+
+    const handleExamSkip = () => {
+        // Passer les examens → proposer ordonnance
+        setWorkflowStep('prescription');
+    };
+
+    const handlePrescriptionDone = () => {
+        // Après ordonnance → checklist post-consultation
+        setWorkflowStep('checklist');
+    };
+
+    const handlePrescriptionSkip = () => {
+        // Passer ordonnance → checklist
+        setWorkflowStep('checklist');
+    };
+
+    const handleWorkflowClose = () => {
+        setWorkflowStep('idle');
+        setWorkflowData(null);
     };
 
     const setStatus = async (entryId: string, statut: string, appointmentId?: string) => {
@@ -297,7 +321,10 @@ const SalleAttente: React.FC = () => {
                 statut: 'en_attente',
                 priorite: 'normale',
                 ordre: maxOrdre + 1,
-                created_by: user?.uid || '',
+                numero_ordre: maxOrdre + 1,
+                motif: appointment.motif || '',
+                // *** FIX: appUser au lieu de user ***
+                created_by: appUser?.uid || '',
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             });
@@ -321,9 +348,11 @@ const SalleAttente: React.FC = () => {
                 statut: 'en_attente',
                 priorite: 'normale',
                 ordre: maxOrdre + 1,
+                numero_ordre: maxOrdre + 1,
                 motif: walkInMotif || 'Sans rendez-vous',
                 type: 'walk-in',
-                created_by: user?.uid || '',
+                // *** FIX: appUser au lieu de user ***
+                created_by: appUser?.uid || '',
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             });
@@ -371,8 +400,8 @@ const SalleAttente: React.FC = () => {
                 </div>
             )}
 
-            {/* Statistiques */}
-            <div className="grid grid-cols-4 gap-4">
+            {/* *** FIX Reg 3: Statistiques avec "Prêts" séparé *** */}
+            <div className="grid grid-cols-5 gap-4">
                 <div className="bg-white rounded-lg border p-4 text-center">
                     <Users className="w-6 h-6 text-indigo-600 mx-auto mb-1" />
                     <p className="text-2xl font-bold">{stats.total}</p>
@@ -384,12 +413,17 @@ const SalleAttente: React.FC = () => {
                     <p className="text-xs text-gray-500">En attente</p>
                 </div>
                 <div className="bg-white rounded-lg border p-4 text-center">
+                    <CheckSquare className="w-6 h-6 text-green-600 mx-auto mb-1" />
+                    <p className="text-2xl font-bold">{stats.prets}</p>
+                    <p className="text-xs text-gray-500">Prêts</p>
+                </div>
+                <div className="bg-white rounded-lg border p-4 text-center">
                     <Stethoscope className="w-6 h-6 text-purple-600 mx-auto mb-1" />
                     <p className="text-2xl font-bold">{stats.enConsultation}</p>
                     <p className="text-xs text-gray-500">En consultation</p>
                 </div>
                 <div className="bg-white rounded-lg border p-4 text-center">
-                    <CheckCircle className="w-6 h-6 text-green-600 mx-auto mb-1" />
+                    <CheckCircle className="w-6 h-6 text-gray-500 mx-auto mb-1" />
                     <p className="text-2xl font-bold">{stats.termines}</p>
                     <p className="text-xs text-gray-500">Terminés</p>
                 </div>
@@ -403,15 +437,12 @@ const SalleAttente: React.FC = () => {
                     </h2>
                     <div className="space-y-2">
                         {pendingAppointments.map((apt: any) => (
-                            <div
-                                key={apt.id}
-                                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                            >
+                            <div key={apt.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                                 <div>
                                     <span className="font-medium text-gray-900">
                                         {getPatientName(apt.patient_id)}
                                     </span>
-                                    <span className="text-sm text-gray-500 ml-3">{apt.heure || '—'}</span>
+                                    <span className="text-sm text-gray-500 ml-3">{apt.heure_rdv || apt.heure || '—'}</span>
                                     {apt.motif && (
                                         <span className="text-sm text-gray-400 ml-2">— {apt.motif}</span>
                                     )}
@@ -453,7 +484,6 @@ const SalleAttente: React.FC = () => {
                                 <div key={entry.id} className="p-4 hover:bg-gray-50">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-3">
-                                            {/* Ordre */}
                                             <div className="flex flex-col items-center gap-0.5">
                                                 <button
                                                     onClick={() => moveEntry(entry.id, 'up')}
@@ -471,8 +501,6 @@ const SalleAttente: React.FC = () => {
                                                     <ChevronDown className="w-3 h-3" />
                                                 </button>
                                             </div>
-
-                                            {/* Info patient */}
                                             <div>
                                                 <span className="font-medium text-gray-900">
                                                     {getPatientName(entry.patient_id)}
@@ -487,16 +515,12 @@ const SalleAttente: React.FC = () => {
                                                             {prioConf.label}
                                                         </span>
                                                     )}
-                                                    {duration && (
-                                                        <span className="text-xs text-gray-400">{duration}</span>
-                                                    )}
+                                                    {duration && <span className="text-xs text-gray-400">{duration}</span>}
                                                 </div>
                                             </div>
                                         </div>
 
-                                        {/* Actions */}
                                         <div className="flex items-center gap-2">
-                                            {/* Priorité */}
                                             <select
                                                 value={entry.priorite || 'normale'}
                                                 onChange={(e) => changePriorite(entry.id, e.target.value)}
@@ -507,7 +531,6 @@ const SalleAttente: React.FC = () => {
                                                 <option value="prioritaire">Prioritaire</option>
                                             </select>
 
-                                            {/* Bouton contextuel selon statut */}
                                             {entry.statut === 'en_attente' && (
                                                 <button
                                                     onClick={() => handlePreConsult(entry)}
@@ -545,7 +568,6 @@ const SalleAttente: React.FC = () => {
                                                 </button>
                                             )}
 
-                                            {/* Annuler */}
                                             {!['termine', 'annule'].includes(entry.statut) && (
                                                 <button
                                                     onClick={() => {
@@ -568,7 +590,7 @@ const SalleAttente: React.FC = () => {
                 )}
             </div>
 
-            {/* Patients terminés / annulés */}
+            {/* Terminés / Annulés */}
             {completedEntries.length > 0 && (
                 <div className="bg-white rounded-xl border">
                     <div className="p-4 border-b">
@@ -592,10 +614,11 @@ const SalleAttente: React.FC = () => {
                 </div>
             )}
 
-            {/* Modal : Ajout sans rendez-vous */}
+            {/* Modal: Ajout sans rendez-vous */}
             {showAddWalkIn && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                    <div className="fixed inset-0 bg-black/50" onClick={() => { setShowAddWalkIn(false); setWalkInPatientId(''); setWalkInMotif(''); }} />
+                    <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6 space-y-4 z-50">
                         <h2 className="text-lg font-bold text-gray-900">Patient sans rendez-vous</h2>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Patient</label>
@@ -606,11 +629,10 @@ const SalleAttente: React.FC = () => {
                             >
                                 <option value="">Sélectionner un patient</option>
                                 {Object.values(patientsMap)
+                                    .filter((p: any) => p.deleted !== true)
                                     .sort((a: any, b: any) => (a.nom || '').localeCompare(b.nom || ''))
                                     .map((p: any) => (
-                                        <option key={p.id} value={p.id}>
-                                            {p.nom} {p.prenom}
-                                        </option>
+                                        <option key={p.id} value={p.id}>{p.nom} {p.prenom}</option>
                                     ))}
                             </select>
                         </div>
@@ -626,11 +648,7 @@ const SalleAttente: React.FC = () => {
                         </div>
                         <div className="flex justify-end gap-3">
                             <button
-                                onClick={() => {
-                                    setShowAddWalkIn(false);
-                                    setWalkInPatientId('');
-                                    setWalkInMotif('');
-                                }}
+                                onClick={() => { setShowAddWalkIn(false); setWalkInPatientId(''); setWalkInMotif(''); }}
                                 className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
                             >
                                 Annuler
@@ -647,7 +665,7 @@ const SalleAttente: React.FC = () => {
                 </div>
             )}
 
-            {/* Modal : Pré-consultation */}
+            {/* *** FIX Reg 6: Modal pré-consultation avec overlay correct *** */}
             {preConsultTarget && (
                 <PreConsultationForm
                     entry={preConsultTarget}
@@ -656,15 +674,47 @@ const SalleAttente: React.FC = () => {
                 />
             )}
 
-            {/* *** CHANGEMENT : PostConsultationModal direct, PAS PostConsultationFlow *** */}
-            {postConsultTarget && (
+            {/* *** FIX Reg 5: Workflow post-consultation en 3 étapes *** */}
+            {workflowStep === 'exams' && workflowData && (
+                <ExamRequestModal
+                    patientId={workflowData.patientId}
+                    patientName={workflowData.patientName}
+                    consultationId={workflowData.consultationId}
+                    onComplete={handleExamComplete}
+                    onClose={handleExamSkip}
+                />
+            )}
+
+            {workflowStep === 'prescription' && workflowData && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                    <div className="fixed inset-0 bg-black/50" onClick={handlePrescriptionSkip} />
+                    <div className="relative z-50 bg-white rounded-xl shadow-2xl w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
+                        <div className="p-4 border-b flex items-center justify-between">
+                            <h3 className="text-lg font-medium">Ordonnance pour {workflowData.patientName}</h3>
+                            <button
+                                onClick={handlePrescriptionSkip}
+                                className="px-3 py-1.5 text-sm text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
+                            >
+                                Passer →
+                            </button>
+                        </div>
+                        <PrescriptionForm
+                            patientIdProp={workflowData.patientId}
+                            consultationIdProp={workflowData.consultationId}
+                            onClose={handlePrescriptionDone}
+                        />
+                    </div>
+                </div>
+            )}
+
+            {workflowStep === 'checklist' && workflowData && (
                 <PostConsultationModal
-                    entryId={postConsultTarget.entryId}
-                    patientName={postConsultTarget.patientName}
-                    appointmentId={postConsultTarget.appointmentId}
-                    patientId={postConsultTarget.patientId}
-                    consultationId={postConsultTarget.consultationId}
-                    onClose={() => setPostConsultTarget(null)}
+                    entryId={workflowData.entryId}
+                    patientName={workflowData.patientName}
+                    appointmentId={workflowData.appointmentId}
+                    patientId={workflowData.patientId}
+                    consultationId={workflowData.consultationId}
+                    onClose={handleWorkflowClose}
                 />
             )}
         </div>

@@ -25,12 +25,24 @@ interface PreConsultationFormProps {
     onClose: () => void;
 }
 
+// Champs par défaut si settings.champs_pre_consultation n'existe pas
+const DEFAULT_CHAMPS = [
+    { nom: 'poids', label: 'Poids', unite: 'kg', type: 'number', obligatoire: false, actif: true },
+    { nom: 'tension_systolique', label: 'Tension systolique', unite: 'mmHg', type: 'number', obligatoire: false, actif: true },
+    { nom: 'tension_diastolique', label: 'Tension diastolique', unite: 'mmHg', type: 'number', obligatoire: false, actif: true },
+    { nom: 'temperature', label: 'Température', unite: '°C', type: 'number', obligatoire: false, actif: true },
+    { nom: 'glycemie', label: 'Glycémie', unite: 'g/L', type: 'number', obligatoire: false, actif: true },
+    { nom: 'saturation_o2', label: 'Saturation O₂', unite: '%', type: 'number', obligatoire: false, actif: true },
+    { nom: 'frequence_cardiaque', label: 'Fréquence cardiaque', unite: 'bpm', type: 'number', obligatoire: false, actif: true },
+];
+
 const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
     entry,
     patientName,
     onClose,
 }) => {
-    const { user } = useAuth();
+    // *** FIX: appUser au lieu de user ***
+    const { appUser } = useAuth();
     const { settings } = useSettings();
     const [loading, setLoading] = useState(false);
     const [initialLoading, setInitialLoading] = useState(true);
@@ -48,24 +60,25 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
         observations_pre_consultation: '',
     });
 
-    // Champs dynamiques depuis les settings
-    const champsPreConsultation = settings?.champs_pre_consultation?.filter(
-        (c: any) => c.actif !== false
-    ) || [
-            { nom: 'poids', label: 'Poids', unite: 'kg', type: 'number', obligatoire: false, actif: true },
-            { nom: 'tension_systolique', label: 'Tension systolique', unite: 'mmHg', type: 'number', obligatoire: false, actif: true },
-            { nom: 'tension_diastolique', label: 'Tension diastolique', unite: 'mmHg', type: 'number', obligatoire: false, actif: true },
-            { nom: 'temperature', label: 'Température', unite: '°C', type: 'number', obligatoire: false, actif: true },
-            { nom: 'glycemie', label: 'Glycémie', unite: 'g/L', type: 'number', obligatoire: false, actif: true },
-            { nom: 'saturation_o2', label: 'Saturation O₂', unite: '%', type: 'number', obligatoire: false, actif: true },
-            { nom: 'frequence_cardiaque', label: 'Fréquence cardiaque', unite: 'bpm', type: 'number', obligatoire: false, actif: true },
-        ];
+    // Champs dynamiques depuis les settings, avec déduplication par nom
+    const champsPreConsultation = (() => {
+        const raw = settings?.champs_pre_consultation?.filter(
+            (c: any) => c.actif !== false
+        );
+        if (!raw || raw.length === 0) return DEFAULT_CHAMPS;
+        // Déduplication : garder uniquement le premier champ pour chaque nom
+        const seen = new Set<string>();
+        return raw.filter((c: any) => {
+            if (seen.has(c.nom)) return false;
+            seen.add(c.nom);
+            return true;
+        });
+    })();
 
     // Charger données patient + consultation existante
     useEffect(() => {
         const loadData = async () => {
             try {
-                // Charger le patient
                 const patientDoc = await getDoc(doc(db, 'patients', entry.patient_id));
                 if (patientDoc.exists()) {
                     const patientData = patientDoc.data();
@@ -77,34 +90,26 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
                     }));
                 }
 
-                // Chercher une consultation existante pour aujourd'hui
-                const today = new Date();
-                const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-                const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
-
+                const today = new Date().toISOString().split('T')[0];
                 let consultationData: any = null;
 
-                // Si on a déjà un consultation_id dans l'entrée
                 if (entry.consultation_id) {
                     const consultDoc = await getDoc(doc(db, 'consultations', entry.consultation_id));
                     if (consultDoc.exists()) {
                         consultationData = consultDoc.data();
                     }
                 } else {
-                    // Chercher par patient + date
                     const q = query(
                         collection(db, 'consultations'),
                         where('patient_id', '==', entry.patient_id),
-                        where('date_consultation', '>=', startOfDay.toISOString().split('T')[0]),
-                        where('date_consultation', '<=', endOfDay.toISOString().split('T')[0])
+                        where('date_consultation', '==', today)
                     );
                     const snap = await getDocs(q);
                     if (!snap.empty) {
-                        consultationData = snap.docs[0].data();
+                        consultationData = { id: snap.docs[0].id, ...snap.docs[0].data() };
                     }
                 }
 
-                // Pré-remplir avec données existantes
                 if (consultationData?.pre_consultation) {
                     const pc = consultationData.pre_consultation;
                     setFormData((prev) => ({
@@ -129,6 +134,7 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
         loadData();
     }, [entry.patient_id, entry.consultation_id]);
 
+    // *** FIX Reg 2: handleChange utilise le nom du champ correctement ***
     const handleChange = (field: string, value: any) => {
         setFormData((prev) => ({ ...prev, [field]: value }));
     };
@@ -138,7 +144,6 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
         setLoading(true);
 
         try {
-            // Construire la tension combinée pour rétrocompatibilité
             const tensionStr =
                 formData.tension_systolique && formData.tension_diastolique
                     ? `${formData.tension_systolique}/${formData.tension_diastolique}`
@@ -155,8 +160,9 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
                 frequence_cardiaque: formData.frequence_cardiaque ? parseFloat(formData.frequence_cardiaque) : null,
                 allergies: formData.allergies || '',
                 observations_pre_consultation: formData.observations_pre_consultation || '',
-                realise_par: user?.uid || '',
-                realise_par_nom: user?.name || '',
+                // *** FIX: appUser au lieu de user ***
+                realise_par: appUser?.uid || '',
+                realise_par_nom: appUser?.prenom ? `${appUser.prenom} ${appUser.nom}` : '',
                 date_realisation: new Date().toISOString(),
             };
 
@@ -171,29 +177,26 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
             });
 
             const today = new Date().toISOString().split('T')[0];
-
             let consultationId = entry.consultation_id;
 
             if (consultationId) {
-                // Mettre à jour la consultation existante
                 await updateDoc(doc(db, 'consultations', consultationId), {
                     pre_consultation: preConsultPayload,
                     poids: preConsultPayload.poids,
                     tension: tensionStr,
-                    statut: 'pre_consultation',
+                    statutConsultation: 'pre_consultation',
                     updated_at: new Date().toISOString(),
                 });
             } else {
-                // Créer une nouvelle consultation
                 const newConsult = await addDoc(collection(db, 'consultations'), {
                     patient_id: entry.patient_id,
                     date_consultation: today,
                     pre_consultation: preConsultPayload,
                     poids: preConsultPayload.poids,
                     tension: tensionStr,
-                    statut: 'pre_consultation',
+                    statutConsultation: 'pre_consultation',
                     allergies: formData.allergies,
-                    created_by: user?.uid || '',
+                    created_by: appUser?.uid || '',
                     created_at: new Date().toISOString(),
                     updated_at: new Date().toISOString(),
                 });
@@ -206,7 +209,6 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
             };
             if (preConsultPayload.poids) patientUpdate.poids = preConsultPayload.poids;
             if (formData.allergies) patientUpdate.allergies = formData.allergies;
-
             await updateDoc(doc(db, 'patients', entry.patient_id), patientUpdate);
 
             // Mettre à jour l'entrée file d'attente
@@ -226,18 +228,17 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
         }
     };
 
-    // Fonction utilitaire : construire le label SANS duplication d'unité
     const buildLabel = (champ: any): string => {
         if (!champ.unite) return champ.label;
-        // Si le label contient déjà l'unité entre parenthèses, ne pas la rajouter
         if (champ.label.includes(`(${champ.unite})`)) return champ.label;
         return `${champ.label} (${champ.unite})`;
     };
 
     if (initialLoading) {
         return (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-xl p-8 flex items-center gap-3">
+            <div className="fixed inset-0 z-50 flex items-center justify-center">
+                <div className="fixed inset-0 bg-black/50" />
+                <div className="relative bg-white rounded-xl p-8 flex items-center gap-3 z-50">
                     <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
                     <span>Chargement...</span>
                 </div>
@@ -246,8 +247,10 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
     }
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* *** FIX Reg 6: Overlay correct avec bg-black/50 *** */}
+            <div className="fixed inset-0 bg-black/50" onClick={onClose} />
+            <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto z-50">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b">
                     <div>
@@ -264,7 +267,7 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
 
                 {/* Formulaire */}
                 <form onSubmit={handleSubmit} className="p-6 space-y-6">
-                    {/* Constantes vitales dynamiques */}
+                    {/* Constantes vitales */}
                     <div>
                         <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">
                             Constantes vitales
@@ -278,7 +281,7 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
                                     <input
                                         type={champ.type === 'number' ? 'number' : 'text'}
                                         step={champ.type === 'number' ? '0.1' : undefined}
-                                        value={formData[champ.nom] || ''}
+                                        value={formData[champ.nom] ?? ''}
                                         onChange={(e) => handleChange(champ.nom, e.target.value)}
                                         placeholder={champ.unite || ''}
                                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
@@ -302,7 +305,7 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
                         />
                     </div>
 
-                    {/* Observations pré-consultation */}
+                    {/* Observations */}
                     <div>
                         <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">
                             Observations pré-consultation
