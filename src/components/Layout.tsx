@@ -28,7 +28,7 @@ const navigation = [
   { name: 'Patients', href: '/patients', icon: Users, roles: ['admin', 'medecin', 'assistante'] },
   { name: 'Rendez-vous', href: '/appointments', icon: Calendar, roles: ['admin', 'medecin', 'assistante'] },
   { name: 'Salle d\'attente', href: '/salle-attente', icon: Clock, roles: ['admin', 'medecin', 'assistante'] },
-  { name: 'Ordonnances', href: '/prescriptions', icon: FileSignature, roles: ['admin', 'medecin'] },
+  //{ name: 'Ordonnances', href: '/prescriptions', icon: FileSignature, roles: ['admin', 'medecin'] },
   { name: 'Médicaments', href: '/medicaments', icon: Pill, roles: ['admin', 'medecin'] },
   { name: 'Paiements', href: '/payments', icon: CreditCard, roles: ['admin', 'medecin', 'assistante'] },
   { name: 'Animation IA', href: '/veo', icon: Video, roles: ['admin', 'medecin'] },

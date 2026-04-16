@@ -225,6 +225,7 @@ const SalleAttente: React.FC = () => {
     };
 
     // *** FIX Reg 5: Workflow Terminer → Examens → Ordonnance → Checklist ***
+    // *** FIX Evol 7: Assistante → checklist direct, médecin → workflow examens/ordonnance ***
     const handleTerminate = (entry: any) => {
         const patientData = patientsMap[entry.patient_id];
         const data = {
@@ -236,9 +237,17 @@ const SalleAttente: React.FC = () => {
             patientId: entry.patient_id,
             consultationId: entry.consultation_id,
         };
-        setWorkflowData(data);
-        setWorkflowStep('exams');
+
+        if (appUser?.role === 'assistante') {
+            // Assistante → directement la checklist post-consultation (paiement)
+            setPostConsultTarget(data);
+        } else {
+            // Médecin → workflow examens → ordonnance → checklist
+            setWorkflowData(data);
+            setWorkflowStep('exams');
+        }
     };
+
 
     const handleExamComplete = () => {
         // Après examens → proposer ordonnance
@@ -699,13 +708,14 @@ const SalleAttente: React.FC = () => {
                             </button>
                         </div>
                         <PrescriptionForm
-                            patientIdProp={workflowData.patientId}
-                            consultationIdProp={workflowData.consultationId}
+                            patientId={workflowData.patientId}
+                            consultationId={workflowData.consultationId}
                             onClose={handlePrescriptionDone}
                         />
                     </div>
                 </div>
             )}
+
 
             {workflowStep === 'checklist' && workflowData && (
                 <PostConsultationModal
@@ -715,6 +725,16 @@ const SalleAttente: React.FC = () => {
                     patientId={workflowData.patientId}
                     consultationId={workflowData.consultationId}
                     onClose={handleWorkflowClose}
+                />
+            )}
+            {postConsultTarget && !workflowData && (
+                <PostConsultationModal
+                    entryId={postConsultTarget.entryId}
+                    patientName={postConsultTarget.patientName}
+                    appointmentId={postConsultTarget.appointmentId}
+                    patientId={postConsultTarget.patientId}
+                    consultationId={postConsultTarget.consultationId}
+                    onClose={() => setPostConsultTarget(null)}
                 />
             )}
         </div>
