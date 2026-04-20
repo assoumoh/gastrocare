@@ -44,6 +44,8 @@ export default function DoctorNotesModal({
     const conduiteATenir = consultationData?.conduite_a_tenir || '';
     const synthese = consultationData?.synthese || '';
     const observations = consultationData?.observations || '';
+    const noteAssistante = consultationData?.note_pour_assistante || '';
+
 
     const hasContent = notes || diagnostic || conduiteATenir || synthese || observations;
 
@@ -111,6 +113,13 @@ export default function DoctorNotesModal({
                                     <p className="text-sm text-slate-800 whitespace-pre-wrap font-mono">{notes}</p>
                                 </div>
                             )}
+                            {noteAssistante && (
+                                <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
+                                    <h4 className="text-xs font-semibold text-teal-800 uppercase tracking-wider mb-1">Message du médecin pour vous</h4>
+                                    <p className="text-sm text-slate-800 whitespace-pre-wrap">{noteAssistante}</p>
+                                </div>
+                            )}
+
                         </div>
                     )}
                 </div>

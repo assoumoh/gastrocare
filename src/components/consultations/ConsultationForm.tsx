@@ -3,7 +3,7 @@ import { collection, addDoc, updateDoc, doc, query, onSnapshot, orderBy } from '
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../hooks/useSettings';
-import { X, Sparkles, FlaskConical, Pill } from 'lucide-react';
+import { X, Sparkles, FlaskConical, Pill, MessageSquare } from 'lucide-react'; // *** MODIFIÉ ***
 import { aiService } from '../../services/aiService';
 import type { ChampPreConsultation } from '../../types';
 import ExamRequestModal from '../salle-attente/ExamRequestModal';
@@ -25,11 +25,12 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
   const [patients, setPatients] = useState<any[]>([]);
   const [notesBrutes, setNotesBrutes] = useState('');
 
-  // *** Workflow post-consultation ***
-  const [postSaveStep, setPostSaveStep] = useState<'none' | 'ask_exams' | 'exams' | 'ask_prescription' | 'prescription'>('none');
+  // *** Workflow post-consultation — MODIFIÉ : ajout ask_note + write_note ***
+  const [postSaveStep, setPostSaveStep] = useState<'none' | 'ask_exams' | 'exams' | 'ask_prescription' | 'prescription' | 'ask_note' | 'write_note'>('none');
   const [savedConsultationId, setSavedConsultationId] = useState<string | null>(null);
   const [savedPatientId, setSavedPatientId] = useState<string>('');
   const [savedPatientName, setSavedPatientName] = useState<string>('');
+  const [noteForAssistante, setNoteForAssistante] = useState(''); // *** NOUVEAU ***
 
   const champsPreConsult = useMemo(() => {
     if (settings?.champs_pre_consultation && Array.isArray(settings.champs_pre_consultation)) {
@@ -165,7 +166,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
     return legacy;
   };
 
-  // Récupérer le nom du patient pour le workflow
   const getPatientName = (pId: string): string => {
     const p = patients.find((pt: any) => pt.id === pId);
     return p ? `${p.nom || ''} ${p.prenom || ''}`.trim() : 'Patient';
@@ -254,8 +254,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
         }
       }
 
-      // *** WORKFLOW POST-CONSULTATION ***
-      // Si le statut est "terminée" et que c'est un médecin → proposer examens/ordonnance
       if (formData.statutConsultation === 'terminee' && appUser?.role !== 'assistante') {
         setSavedConsultationId(consultationDocId);
         setSavedPatientId(formData.patient_id);
@@ -273,9 +271,11 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
     }
   };
 
-  // *** RENDU WORKFLOW POST-CONSULTATION ***
+  // =====================================================================
+  // WORKFLOW POST-CONSULTATION (6 étapes)
+  // =====================================================================
 
-  // Étape 1: Demander examens ? Oui/Non
+  // Étape 1 : Demander examens ? Oui/Non
   if (postSaveStep === 'ask_exams') {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -310,7 +310,7 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
     );
   }
 
-  // Étape 2: Formulaire examens
+  // Étape 2 : Formulaire examens
   if (postSaveStep === 'exams' && savedConsultationId) {
     return (
       <ExamRequestModal
@@ -323,7 +323,7 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
     );
   }
 
-  // Étape 3: Demander ordonnance ? Oui/Non
+  // Étape 3 : Demander ordonnance ? Oui/Non — *** MODIFIÉ : "Non" → ask_note ***
   if (postSaveStep === 'ask_prescription') {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -341,10 +341,10 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
 
           <div className="flex gap-3">
             <button
-              onClick={onClose}
+              onClick={() => setPostSaveStep('ask_note')}
               className="flex-1 px-4 py-3 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
-              Non, terminer
+              Non, passer
             </button>
             <button
               onClick={() => setPostSaveStep('prescription')}
@@ -358,18 +358,121 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
     );
   }
 
-  // Étape 4: Formulaire ordonnance
+  // Étape 4 : Formulaire ordonnance — *** MODIFIÉ : onClose → ask_note ***
   if (postSaveStep === 'prescription') {
     return (
       <PrescriptionForm
         patientIdProp={savedPatientId}
         consultationIdProp={savedConsultationId || undefined}
-        onClose={onClose}
+        onClose={() => setPostSaveStep('ask_note')}
       />
     );
   }
 
-  // *** FORMULAIRE PRINCIPAL (inchangé) ***
+  // *** NOUVEAU — Étape 5 : Proposer de partager une note avec l'assistante ***
+  if (postSaveStep === 'ask_note') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black/50" />
+        <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6 z-50">
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">Note pour l'assistante</h3>
+          <p className="text-sm text-slate-500 mb-6">{savedPatientName}</p>
+
+          <div className="flex items-center gap-3 mb-6 p-4 bg-teal-50 border border-teal-200 rounded-lg">
+            <MessageSquare className="w-6 h-6 text-teal-600 flex-shrink-0" />
+            <p className="text-sm text-teal-800 font-medium">
+              Souhaitez-vous partager une note avec l'assistante sur cette consultation ?
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-3 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Non, terminer
+            </button>
+            <button
+              onClick={() => setPostSaveStep('write_note')}
+              className="flex-1 px-4 py-3 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700"
+            >
+              Oui, écrire
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // *** NOUVEAU — Étape 6 : Saisie de la note ***
+  if (postSaveStep === 'write_note' && savedConsultationId) {
+    const handleSaveNote = async () => {
+      if (!noteForAssistante.trim()) {
+        onClose();
+        return;
+      }
+      try {
+        await updateDoc(doc(db, 'consultations', savedConsultationId), {
+          note_pour_assistante: noteForAssistante.trim(),
+          note_pour_assistante_at: new Date().toISOString(),
+          note_pour_assistante_by: appUser?.uid || '',
+          updated_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error('Erreur sauvegarde note assistante:', err);
+      }
+      onClose();
+    };
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black/50" />
+        <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 p-6 z-50">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 bg-teal-100 rounded-lg">
+              <MessageSquare className="w-5 h-5 text-teal-600" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Note pour l'assistante</h3>
+              <p className="text-sm text-slate-500">{savedPatientName}</p>
+            </div>
+          </div>
+
+          <p className="text-sm text-slate-600 mb-4">
+            Cette note sera visible par l'assistante lorsqu'elle terminera le parcours du patient en salle d'attente.
+          </p>
+
+          <textarea
+            rows={5}
+            value={noteForAssistante}
+            onChange={(e) => setNoteForAssistante(e.target.value)}
+            placeholder="Ex : Programmer un contrôle dans 3 mois, remettre les résultats d'analyses, préparer le dossier CNSS..."
+            className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm focus:border-teal-500 focus:ring-teal-500 resize-none"
+            autoFocus
+          />
+
+          <div className="flex gap-3 mt-5">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Passer
+            </button>
+            <button
+              onClick={handleSaveNote}
+              className="flex-1 px-4 py-2.5 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700"
+            >
+              Enregistrer la note
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // =====================================================================
+  // FORMULAIRE PRINCIPAL (inchangé)
+  // =====================================================================
   return (
     <div className="fixed inset-0 bg-slate-900/50 z-50 overflow-y-auto flex justify-center items-start p-4 sm:p-6">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl my-8 relative">
@@ -379,7 +482,7 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
               {consultation ? 'Modifier la consultation' : 'Nouvelle consultation'}
             </h2>
             {formData.file_attente_id && (
-              <p className="text-xs text-indigo-500 mt-0.5">Liée à la file d'attente</p>
+              <p className="text-xs text-indigo-500 mt-0.5">Lié à la file d'attente</p>
             )}
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-500">
