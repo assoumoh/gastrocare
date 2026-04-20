@@ -41,7 +41,6 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
     patientName,
     onClose,
 }) => {
-    // *** FIX: appUser au lieu de user ***
     const { appUser } = useAuth();
     const { settings } = useSettings();
     const [loading, setLoading] = useState(false);
@@ -66,7 +65,6 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
             (c: any) => c.actif !== false
         );
         if (!raw || raw.length === 0) return DEFAULT_CHAMPS;
-        // Déduplication : garder uniquement le premier champ pour chaque nom
         const seen = new Set<string>();
         return raw.filter((c: any) => {
             if (seen.has(c.nom)) return false;
@@ -134,7 +132,6 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
         loadData();
     }, [entry.patient_id, entry.consultation_id]);
 
-    // *** FIX Reg 2: handleChange utilise le nom du champ correctement ***
     const handleChange = (field: string, value: any) => {
         setFormData((prev) => ({ ...prev, [field]: value }));
     };
@@ -160,7 +157,6 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
                 frequence_cardiaque: formData.frequence_cardiaque ? parseFloat(formData.frequence_cardiaque) : null,
                 allergies: formData.allergies || '',
                 observations_pre_consultation: formData.observations_pre_consultation || '',
-                // *** FIX: appUser au lieu de user ***
                 realise_par: appUser?.uid || '',
                 realise_par_nom: appUser?.prenom ? `${appUser.prenom} ${appUser.nom}` : '',
                 date_realisation: new Date().toISOString(),
@@ -179,11 +175,26 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
             const today = new Date().toISOString().split('T')[0];
             let consultationId = entry.consultation_id;
 
+            // ===== DÉBUT MODIFICATION =====
+            // Construire pre_consultation_data au format attendu par ConsultationForm (clé id)
+            const preConsultDataFormatted: Record<string, any> = {
+                poids: preConsultPayload.poids,
+                tension_systolique: preConsultPayload.tension_systolique,
+                tension_diastolique: preConsultPayload.tension_diastolique,
+                temperature: preConsultPayload.temperature,
+                glycemie: preConsultPayload.glycemie,
+                saturation_o2: preConsultPayload.saturation_o2,
+                frequence_cardiaque: preConsultPayload.frequence_cardiaque,
+            };
+
             if (consultationId) {
                 await updateDoc(doc(db, 'consultations', consultationId), {
                     pre_consultation: preConsultPayload,
+                    pre_consultation_data: preConsultDataFormatted,
                     poids: preConsultPayload.poids,
                     tension: tensionStr,
+                    allergies: formData.allergies,
+                    commentaire_assistante: formData.observations_pre_consultation,
                     statutConsultation: 'pre_consultation',
                     updated_at: new Date().toISOString(),
                 });
@@ -192,16 +203,19 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
                     patient_id: entry.patient_id,
                     date_consultation: today,
                     pre_consultation: preConsultPayload,
+                    pre_consultation_data: preConsultDataFormatted,
                     poids: preConsultPayload.poids,
                     tension: tensionStr,
-                    statutConsultation: 'pre_consultation',
                     allergies: formData.allergies,
+                    commentaire_assistante: formData.observations_pre_consultation,
+                    statutConsultation: 'pre_consultation',
                     created_by: appUser?.uid || '',
                     created_at: new Date().toISOString(),
                     updated_at: new Date().toISOString(),
                 });
                 consultationId = newConsult.id;
             }
+            // ===== FIN MODIFICATION =====
 
             // Mettre à jour le patient (poids + allergies)
             const patientUpdate: Record<string, any> = {
@@ -248,7 +262,6 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            {/* *** FIX Reg 6: Overlay correct avec bg-black/50 *** */}
             <div className="fixed inset-0 bg-black/50" onClick={onClose} />
             <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto z-50">
                 {/* Header */}
