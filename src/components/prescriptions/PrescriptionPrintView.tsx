@@ -49,8 +49,9 @@ export default function PrescriptionPrintView({ prescription, patient, medicamen
           </div>
         </div>
 
-        {/* Printable Area */}
-        <div className="p-12 print:p-8 bg-white text-black overflow-y-auto grow" id="printable-prescription">
+        {/* Printable Area — centré avec marges uniformes */}
+        <div className="p-12 print:p-8 bg-white text-black overflow-y-auto grow" id="printable-area">
+
 
           {/* Doctor Header */}
           <div className="text-center mb-12 border-b-2 border-slate-800 pb-6">
@@ -84,7 +85,7 @@ export default function PrescriptionPrintView({ prescription, patient, medicamen
           <div className="space-y-6 mb-16 min-h-[300px]">
             {prescription?.medicaments?.map((med: any, idx: number) => {
               const medInfo = medicaments[med.medicament_id];
-              const nomMedicament = medInfo ? (medInfo.nomMedicament || medInfo.nom_commercial) : 'Médicament inconnu';
+              const nomMedicament = medInfo ? (medInfo.nomMedicament || medInfo.nom_commercial) : (med.nomMedicament || 'Médicament inconnu');
               const dosage = medInfo?.dosage ? ` ${medInfo.dosage} ${medInfo.uniteDosage || ''}` : '';
               const forme = medInfo?.forme ? ` - ${medInfo.forme}` : '';
 
