@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { collection, addDoc, updateDoc, doc, query, onSnapshot, orderBy, getDocs, limit } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { X, Plus, Trash2, Lightbulb, ChevronDown } from 'lucide-react';
+import { X, Plus, Trash2, Lightbulb, ChevronDown, Printer } from 'lucide-react';
 import Select from 'react-select';
+import PrescriptionPrintView from './PrescriptionPrintView';
 
 interface PrescriptionFormProps {
   prescription?: any;
@@ -37,6 +38,11 @@ export default function PrescriptionForm({ prescription, patientId, consultation
 
   // Changé : on stocke maintenant un TABLEAU de suggestions (max 5) par index de médicament
   const [suggestionsMap, setSuggestionsMap] = useState<{ [index: number]: PosologieSuggestion[] }>({});
+
+  // ===== AJOUT: état pour proposer l'impression après sauvegarde =====
+  const [savedPrescription, setSavedPrescription] = useState<any>(null);
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
+  // ===== FIN AJOUT =====
 
   const applySuggestion = (index: number, suggestionIndex: number = 0) => {
     const suggestions = suggestionsMap[index];
@@ -201,7 +207,16 @@ export default function PrescriptionForm({ prescription, patientId, consultation
         };
         await addDoc(collection(db, 'prescriptions'), createPayload);
       }
-      onClose();
+
+      // ===== AJOUT: proposer l'impression au lieu de fermer directement =====
+      const savedData = {
+        ...prescriptionData,
+        medicaments: validMeds,
+      };
+      setSavedPrescription(savedData);
+      setShowPrintPreview(true);
+      // ===== FIN AJOUT =====
+
     } catch (error: any) {
       console.error("Erreur lors de l'enregistrement:", error);
 
@@ -222,6 +237,34 @@ export default function PrescriptionForm({ prescription, patientId, consultation
       setLoading(false);
     }
   };
+
+  // ===== AJOUT: Aperçu impression après sauvegarde =====
+  if (showPrintPreview && savedPrescription) {
+    const medsMap: Record<string, any> = {};
+    medicamentsList.forEach(m => { medsMap[m.id] = m; });
+
+    const patientData = patients.find(p => p.id === (savedPrescription.patient_id || formData.patient_id));
+
+    return (
+      <div className="fixed inset-0 z-50">
+        <PrescriptionPrintView
+          prescription={savedPrescription}
+          patient={patientData || {}}
+          medicaments={medsMap}
+          onClose={onClose}
+        />
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] print:hidden">
+          <button
+            onClick={onClose}
+            className="px-6 py-3 bg-slate-600 text-white rounded-lg text-sm font-medium hover:bg-slate-700 shadow-lg"
+          >
+            Fermer sans imprimer
+          </button>
+        </div>
+      </div>
+    );
+  }
+  // ===== FIN AJOUT =====
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto">
