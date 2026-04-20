@@ -69,7 +69,8 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
     onComplete,
     onClose,
 }) => {
-    const { user } = useAuth();
+    // *** FIX: appUser au lieu de user ***
+    const { appUser } = useAuth();
     const [exams, setExams] = useState<ExamEntry[]>([
         { type_examen: 'Biologie', nom_examen: EXAM_TYPES['Biologie'][0], commentaire: '' },
     ]);
@@ -92,7 +93,6 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
         setExams((prev) => {
             const updated = [...prev];
             updated[index] = { ...updated[index], [field]: value };
-            // Si on change le type, mettre le premier nom disponible
             if (field === 'type_examen') {
                 const names = EXAM_TYPES[value] || ['Autre'];
                 updated[index].nom_examen = names[0];
@@ -122,7 +122,8 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                     statut: 'demandé',
                     date_demande: today,
                     date_examen: today,
-                    created_by: user?.uid || '',
+                    // *** FIX: appUser au lieu de user ***
+                    created_by: appUser?.uid || '',
                     created_at: now,
                     updated_at: now,
                 });
@@ -146,79 +147,97 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
         onComplete();
     };
 
-    // ======= VUE APRÈS SAUVEGARDE (avec zone imprimable) =======
+    // ======= VUE APRÈS SAUVEGARDE — style aligné avec ordonnance =======
     if (saved) {
         return (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-                    {/* Header écran */}
-                    <div className="flex items-center justify-between p-6 border-b print:hidden">
+            <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto print:bg-white print:p-0">
+                <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-8 relative print:shadow-none print:my-0 print:max-w-none print:rounded-none flex flex-col max-h-[90vh] print:max-h-none print:h-auto">
+
+                    {/* Header écran — masqué à l'impression */}
+                    <div className="flex items-center justify-between p-4 border-b border-slate-200 print:hidden shrink-0">
                         <div className="flex items-center gap-2">
                             <CheckCircle className="w-5 h-5 text-green-600" />
-                            <h2 className="text-xl font-bold text-gray-900">
+                            <h2 className="text-lg font-semibold text-slate-900">
                                 Examens enregistrés ({savedExams.length})
                             </h2>
                         </div>
-                        <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
-                            <X className="w-5 h-5" />
-                        </button>
-                    </div>
-
-                    {/* ZONE IMPRIMABLE — visible à l'écran ET à l'impression */}
-                    <div id="exam-print-area" className="p-8">
-                        <div className="text-center mb-6">
-                            <h1 className="text-xl font-bold">Demande d'Examens Complémentaires</h1>
-                            <p className="text-sm text-gray-600 mt-1">
-                                Date : {new Date().toLocaleDateString('fr-FR')}
-                            </p>
-                        </div>
-
-                        <div className="mb-6">
-                            <p className="text-base">
-                                <strong>Patient :</strong> {patientName}
-                            </p>
-                            {consultationId && (
-                                <p className="text-sm text-gray-500">
-                                    Réf. consultation : {consultationId}
-                                </p>
-                            )}
-                        </div>
-
-                        <table className="w-full border-collapse border border-gray-300 text-sm">
-                            <thead>
-                                <tr className="bg-gray-100">
-                                    <th className="border border-gray-300 p-2 text-left w-10">#</th>
-                                    <th className="border border-gray-300 p-2 text-left">Type</th>
-                                    <th className="border border-gray-300 p-2 text-left">Examen</th>
-                                    <th className="border border-gray-300 p-2 text-left">Commentaire</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {savedExams.map((exam, idx) => (
-                                    <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                        <td className="border border-gray-300 p-2">{idx + 1}</td>
-                                        <td className="border border-gray-300 p-2">{exam.type_examen}</td>
-                                        <td className="border border-gray-300 p-2 font-medium">{exam.nom_examen}</td>
-                                        <td className="border border-gray-300 p-2">{exam.commentaire || '—'}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-
-                        <div className="mt-12 text-right">
-                            <p className="text-sm text-gray-600">Signature du médecin</p>
-                            <div className="mt-8 border-b border-gray-400 w-48 ml-auto"></div>
+                        <div className="flex space-x-2">
+                            <button
+                                onClick={handlePrint}
+                                className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+                            >
+                                <Printer className="mr-2 h-4 w-4" />
+                                Imprimer
+                            </button>
+                            <button onClick={() => onComplete()} className="p-2 text-slate-400 hover:text-slate-500 rounded-full hover:bg-slate-100">
+                                <X className="h-5 w-5" />
+                            </button>
                         </div>
                     </div>
 
-                    {/* Boutons d'action — masqués à l'impression */}
-                    <div className="flex justify-between items-center p-6 border-t print:hidden">
+                    {/* ZONE IMPRIMABLE — même style que PrescriptionPrintView */}
+                    <div className="p-12 print:p-8 bg-white text-black overflow-y-auto grow">
+
+                        {/* En-tête médecin — identique à l'ordonnance */}
+                        <div className="text-center mb-12 border-b-2 border-slate-800 pb-6">
+                            <h1 className="text-2xl font-bold uppercase tracking-wider text-slate-900">Docteur Elidrissi Laila</h1>
+                            <p className="text-sm text-slate-600 mt-1">Spécialiste en Gastro-entérologie et Hépatologie</p>
+                            <p className="text-sm text-slate-600">339, immeuble FENNI, bd Mohamed V</p>
+                        </div>
+
+                        {/* Titre du document */}
+                        <div className="text-center mb-10">
+                            <h2 className="text-xl font-bold uppercase tracking-widest text-slate-900 border-2 border-slate-900 inline-block px-6 py-2">
+                                Demande d'Examens Complémentaires
+                            </h2>
+                        </div>
+
+                        {/* Infos patient + date */}
+                        <div className="flex justify-between items-start mb-12 text-base">
+                            <div className="space-y-1">
+                                <p><span className="font-semibold">Patient :</span> {patientName}</p>
+                            </div>
+                            <div className="text-right">
+                                <p>Le {new Date().toLocaleDateString('fr-FR')}</p>
+                            </div>
+                        </div>
+
+                        {/* Tableau des examens */}
+                        <div className="space-y-6 mb-16 min-h-[200px]">
+                            {savedExams.map((exam, idx) => (
+                                <div key={idx} className="pl-4 border-l-4 border-slate-200">
+                                    <p className="font-bold text-lg text-slate-900">
+                                        • {exam.nom_examen}
+                                    </p>
+                                    <p className="text-base text-slate-800 mt-1 ml-4">
+                                        <span className="font-semibold">Type :</span> {exam.type_examen}
+                                    </p>
+                                    {exam.commentaire && (
+                                        <p className="text-sm text-slate-600 italic ml-4 mt-1">
+                                            Note : {exam.commentaire}
+                                        </p>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Signature */}
+                        <div className="flex justify-end mt-20">
+                            <div className="text-center">
+                                <p className="font-semibold mb-16">Signature / Cachet</p>
+                                <div className="w-48 border-b border-slate-300"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Bouton continuer — masqué à l'impression */}
+                    <div className="flex justify-between items-center p-4 border-t border-slate-200 print:hidden shrink-0">
                         <button
                             onClick={handlePrint}
                             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
                         >
                             <Printer className="w-4 h-4" />
-                            Imprimer la demande
+                            Imprimer
                         </button>
                         <button
                             onClick={onComplete}
@@ -233,9 +252,9 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
         );
     }
 
-    // ======= VUE FORMULAIRE SAISIE =======
+    // ======= VUE FORMULAIRE SAISIE (inchangée) =======
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b">
@@ -350,7 +369,7 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                         ) : (
                             <>
                                 <Save className="w-4 h-4" />
-                                Enregistrer et imprimer
+                                Enregistrer les examens
                             </>
                         )}
                     </button>
