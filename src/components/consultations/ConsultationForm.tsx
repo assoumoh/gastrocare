@@ -32,24 +32,52 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
   const [savedPatientName, setSavedPatientName] = useState<string>('');
   const [noteForAssistante, setNoteForAssistante] = useState(''); // *** NOUVEAU ***
 
+  const DEFAULT_PRE_CONSULT_CHAMPS = [
+    { id: 'poids', nom: 'poids', label: 'Poids', type: 'number' as const, unite: 'kg', actif: true, ordre: 1 },
+    { id: 'tension_systolique', nom: 'tension_systolique', label: 'Tension systolique', type: 'number' as const, unite: 'mmHg', actif: true, ordre: 2 },
+    { id: 'tension_diastolique', nom: 'tension_diastolique', label: 'Tension diastolique', type: 'number' as const, unite: 'mmHg', actif: true, ordre: 3 },
+    { id: 'glycemie', nom: 'glycemie', label: 'Glycémie', type: 'number' as const, unite: 'g/L', actif: true, ordre: 4 },
+    { id: 'temperature', nom: 'temperature', label: 'Température', type: 'number' as const, unite: '°C', actif: true, ordre: 5 },
+    { id: 'saturation_o2', nom: 'saturation_o2', label: 'Saturation O₂', type: 'number' as const, unite: '%', actif: true, ordre: 6 },
+    { id: 'frequence_cardiaque', nom: 'frequence_cardiaque', label: 'Fréquence cardiaque', type: 'number' as const, unite: 'bpm', actif: true, ordre: 7 },
+  ];
+
+  const DEFAULT_PRE_CONSULT_CHAMPS = [
+    { id: 'poids', nom: 'poids', label: 'Poids', type: 'number' as const, unite: 'kg', actif: true, ordre: 1 },
+    { id: 'tension_systolique', nom: 'tension_systolique', label: 'Tension systolique', type: 'number' as const, unite: 'mmHg', actif: true, ordre: 2 },
+    { id: 'tension_diastolique', nom: 'tension_diastolique', label: 'Tension diastolique', type: 'number' as const, unite: 'mmHg', actif: true, ordre: 3 },
+    { id: 'glycemie', nom: 'glycemie', label: 'Glycémie', type: 'number' as const, unite: 'g/L', actif: true, ordre: 4 },
+    { id: 'temperature', nom: 'temperature', label: 'Température', type: 'number' as const, unite: '°C', actif: true, ordre: 5 },
+    { id: 'saturation_o2', nom: 'saturation_o2', label: 'Saturation O₂', type: 'number' as const, unite: '%', actif: true, ordre: 6 },
+    { id: 'frequence_cardiaque', nom: 'frequence_cardiaque', label: 'Fréquence cardiaque', type: 'number' as const, unite: 'bpm', actif: true, ordre: 7 },
+  ];
+
   const champsPreConsult = useMemo(() => {
+    let fromSettings: any[] = [];
+
     if (settings?.champs_pre_consultation && Array.isArray(settings.champs_pre_consultation)) {
-      // Utiliser les champs des settings, en s'assurant que id = nom (compatibilité PreConsultationForm)
-      return [...settings.champs_pre_consultation]
+      fromSettings = [...settings.champs_pre_consultation]
         .filter((c: ChampPreConsultation) => c.actif)
         .sort((a: ChampPreConsultation, b: ChampPreConsultation) => a.ordre - b.ordre)
         .map((c: any) => ({ ...c, id: c.id || c.nom }));
     }
-    return [
-      { id: 'poids', label: 'Poids', type: 'number' as const, unite: 'kg', actif: true, ordre: 1 },
-      { id: 'tension_systolique', label: 'Tension systolique', type: 'number' as const, unite: 'mmHg', actif: true, ordre: 2 },
-      { id: 'tension_diastolique', label: 'Tension diastolique', type: 'number' as const, unite: 'mmHg', actif: true, ordre: 3 },
-      { id: 'glycemie', label: 'Glycémie', type: 'number' as const, unite: 'g/L', actif: true, ordre: 4 },
-      { id: 'temperature', label: 'Température', type: 'number' as const, unite: '°C', actif: true, ordre: 5 },
-      { id: 'saturation_o2', label: 'Saturation O₂', type: 'number' as const, unite: '%', actif: true, ordre: 6 },
-      { id: 'frequence_cardiaque', label: 'Fréquence cardiaque', type: 'number' as const, unite: 'bpm', actif: true, ordre: 7 },
-    ];
+
+    if (fromSettings.length === 0) return DEFAULT_PRE_CONSULT_CHAMPS;
+
+    // Fusionner settings + DEFAULT manquants, déduplication par id normalisé
+    const seen = new Set(fromSettings.map((c: any) => (c.id || '').toLowerCase().trim()));
+    const merged = [...fromSettings];
+    DEFAULT_PRE_CONSULT_CHAMPS.forEach((c) => {
+      const key = (c.id || '').toLowerCase().trim();
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(c);
+      }
+    });
+    return merged;
   }, [settings]);
+
+
 
 
   const buildInitialFormData = () => {
