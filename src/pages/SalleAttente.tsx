@@ -32,6 +32,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../hooks/useSettings';
 import PreConsultationForm from '../components/salle-attente/PreConsultationForm';
 import PostConsultationModal from '../components/salle-attente/PostConsultationModal';
+import DoctorNotesModal from '../components/salle-attente/DoctorNotesModal'; // *** NOUVEAU ***
 import ExamRequestModal from '../components/salle-attente/ExamRequestModal';
 import PrescriptionForm from '../components/prescriptions/PrescriptionForm';
 
@@ -51,7 +52,6 @@ const PRIORITE_CONFIG: Record<string, { label: string; color: string }> = {
 };
 
 const SalleAttente: React.FC = () => {
-    // *** FIX: appUser au lieu de user ***
     const { appUser } = useAuth();
     const { settings } = useSettings();
     const navigate = useNavigate();
@@ -68,8 +68,9 @@ const SalleAttente: React.FC = () => {
     const [walkInMotif, setWalkInMotif] = useState('');
     const [preConsultTarget, setPreConsultTarget] = useState<any>(null);
     const [postConsultTarget, setPostConsultTarget] = useState<any>(null);
+    const [doctorNotesTarget, setDoctorNotesTarget] = useState<any>(null); // *** NOUVEAU ***
 
-    // Workflow post-consultation (Reg 5)
+    // Workflow post-consultation (médecin uniquement)
     const [workflowStep, setWorkflowStep] = useState<'idle' | 'exams' | 'prescription' | 'checklist'>('idle');
     const [workflowData, setWorkflowData] = useState<any>(null);
 
@@ -108,7 +109,7 @@ const SalleAttente: React.FC = () => {
         return unsub;
     }, []);
 
-    // *** FIX Reg 1: Utiliser date_rdv au lieu de date ***
+    // Listener appointments (date_rdv)
     useEffect(() => {
         const q = query(
             collection(db, 'appointments'),
@@ -156,7 +157,6 @@ const SalleAttente: React.FC = () => {
         return entries.filter((e: any) => ['termine', 'annule'].includes(e.statut));
     }, [entries]);
 
-    // *** FIX Reg 3: Stats séparées pour En attente / Prêts ***
     const stats = useMemo(() => {
         const s = { total: entries.length, enAttente: 0, prets: 0, enConsultation: 0, termines: 0 };
         entries.forEach((e: any) => {
@@ -168,7 +168,6 @@ const SalleAttente: React.FC = () => {
         return s;
     }, [entries]);
 
-    // Formatage durée
     const formatDuration = (ms: number) => {
         const mins = Math.floor(ms / 60000);
         if (mins < 60) return `${mins} min`;
@@ -203,7 +202,6 @@ const SalleAttente: React.FC = () => {
         }
     };
 
-    // *** FIX Reg 4: Naviguer vers l'onglet consultations avec consultationMode=active ***
     const handleStartConsultation = async (entry: any) => {
         try {
             await updateDoc(doc(db, 'file_attente', entry.id), {
@@ -216,7 +214,6 @@ const SalleAttente: React.FC = () => {
                     statut: 'en_consultation',
                 });
             }
-            // Naviguer vers patient avec tab=consultations ET consultationMode=active
             navigate(`/patients/${entry.patient_id}?tab=consultations&consultationMode=active`);
         } catch (err) {
             console.error(err);
@@ -224,8 +221,7 @@ const SalleAttente: React.FC = () => {
         }
     };
 
-    // *** FIX Reg 5: Workflow Terminer → Examens → Ordonnance → Checklist ***
-    // *** FIX Evol 7: Assistante → checklist direct, médecin → workflow examens/ordonnance ***
+    // *** MODIFIÉ : Assistante → Notes médecin d'abord, puis checklist ***
     const handleTerminate = (entry: any) => {
         const patientData = patientsMap[entry.patient_id];
         const data = {
@@ -239,8 +235,8 @@ const SalleAttente: React.FC = () => {
         };
 
         if (appUser?.role === 'assistante') {
-            // Assistante → directement la checklist post-consultation (paiement)
-            setPostConsultTarget(data);
+            // Assistante → voir les notes du médecin, puis checklist
+            setDoctorNotesTarget(data); // *** MODIFIÉ ***
         } else {
             // Médecin → workflow examens → ordonnance → checklist
             setWorkflowData(data);
@@ -248,24 +244,19 @@ const SalleAttente: React.FC = () => {
         }
     };
 
-
     const handleExamComplete = () => {
-        // Après examens → proposer ordonnance
         setWorkflowStep('prescription');
     };
 
     const handleExamSkip = () => {
-        // Passer les examens → proposer ordonnance
         setWorkflowStep('prescription');
     };
 
     const handlePrescriptionDone = () => {
-        // Après ordonnance → checklist post-consultation
         setWorkflowStep('checklist');
     };
 
     const handlePrescriptionSkip = () => {
-        // Passer ordonnance → checklist
         setWorkflowStep('checklist');
     };
 
@@ -332,7 +323,6 @@ const SalleAttente: React.FC = () => {
                 ordre: maxOrdre + 1,
                 numero_ordre: maxOrdre + 1,
                 motif: appointment.motif || '',
-                // *** FIX: appUser au lieu de user ***
                 created_by: appUser?.uid || '',
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
@@ -360,7 +350,6 @@ const SalleAttente: React.FC = () => {
                 numero_ordre: maxOrdre + 1,
                 motif: walkInMotif || 'Sans rendez-vous',
                 type: 'walk-in',
-                // *** FIX: appUser au lieu de user ***
                 created_by: appUser?.uid || '',
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
@@ -409,7 +398,7 @@ const SalleAttente: React.FC = () => {
                 </div>
             )}
 
-            {/* *** FIX Reg 3: Statistiques avec "Prêts" séparé *** */}
+            {/* Statistiques */}
             <div className="grid grid-cols-5 gap-4">
                 <div className="bg-white rounded-lg border p-4 text-center">
                     <Users className="w-6 h-6 text-indigo-600 mx-auto mb-1" />
@@ -674,7 +663,7 @@ const SalleAttente: React.FC = () => {
                 </div>
             )}
 
-            {/* *** FIX Reg 6: Modal pré-consultation avec overlay correct *** */}
+            {/* Modal pré-consultation */}
             {preConsultTarget && (
                 <PreConsultationForm
                     entry={preConsultTarget}
@@ -683,7 +672,7 @@ const SalleAttente: React.FC = () => {
                 />
             )}
 
-            {/* *** FIX Reg 5: Workflow post-consultation en 3 étapes *** */}
+            {/* Workflow post-consultation MÉDECIN : examens → ordonnance → checklist */}
             {workflowStep === 'exams' && workflowData && (
                 <ExamRequestModal
                     patientId={workflowData.patientId}
@@ -716,7 +705,6 @@ const SalleAttente: React.FC = () => {
                 </div>
             )}
 
-
             {workflowStep === 'checklist' && workflowData && (
                 <PostConsultationModal
                     entryId={workflowData.entryId}
@@ -727,6 +715,22 @@ const SalleAttente: React.FC = () => {
                     onClose={handleWorkflowClose}
                 />
             )}
+
+            {/* *** NOUVEAU : Notes du médecin pour l'assistante *** */}
+            {doctorNotesTarget && (
+                <DoctorNotesModal
+                    consultationId={doctorNotesTarget.consultationId}
+                    patientName={doctorNotesTarget.patientName}
+                    onContinue={() => {
+                        // Après lecture des notes → passer au checklist post-consultation
+                        setPostConsultTarget(doctorNotesTarget);
+                        setDoctorNotesTarget(null);
+                    }}
+                    onClose={() => setDoctorNotesTarget(null)}
+                />
+            )}
+
+            {/* Checklist post-consultation pour l'assistante (après les notes) */}
             {postConsultTarget && !workflowData && (
                 <PostConsultationModal
                     entryId={postConsultTarget.entryId}
