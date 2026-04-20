@@ -65,13 +65,26 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
             (c: any) => c.actif !== false
         );
         if (!raw || raw.length === 0) return DEFAULT_CHAMPS;
+
+        // Fusionner : settings + DEFAULT_CHAMPS manquants
         const seen = new Set<string>();
-        return raw.filter((c: any) => {
-            if (seen.has(c.nom)) return false;
-            seen.add(c.nom);
-            return true;
+        const merged: any[] = [];
+        raw.forEach((c: any) => {
+            if (!seen.has(c.nom)) {
+                seen.add(c.nom);
+                merged.push(c);
+            }
         });
+        // Ajouter les champs par défaut qui ne sont pas dans les settings
+        DEFAULT_CHAMPS.forEach((c) => {
+            if (!seen.has(c.nom)) {
+                seen.add(c.nom);
+                merged.push(c);
+            }
+        });
+        return merged;
     })();
+
 
     // Charger données patient + consultation existante
     useEffect(() => {
