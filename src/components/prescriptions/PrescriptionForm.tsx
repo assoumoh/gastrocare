@@ -1,443 +1,474 @@
+// src/components/prescriptions/PrescriptionForm.tsx
+
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, updateDoc, doc, query, onSnapshot, orderBy, getDocs, limit } from 'firebase/firestore';
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  doc,
+  query,
+  onSnapshot,
+  orderBy,
+  getDocs,
+  limit,
+  where,
+  Timestamp,
+} from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { X, Plus, Trash2, Lightbulb, ChevronDown, Printer } from 'lucide-react'; // *** MODIFIÉ: ajout Printer ***
+import { X, Plus, Trash2, Printer, ArrowRight } from 'lucide-react';
 import Select from 'react-select';
-import PrescriptionPrintView from './PrescriptionPrintView'; // *** NOUVEAU ***
+import PrescriptionPrintView from './PrescriptionPrintView';
 
 interface PrescriptionFormProps {
   prescription?: any;
   patientId?: string;
   consultationId?: string;
-  onClose: () => void;
   inline?: boolean;
+  onClose: () => void;
 }
 
 interface PosologieSuggestion {
   posologie: string;
   duree: string;
-  instructions_speciales: string;
+  instructions_speciales?: string;
 }
 
-export default function PrescriptionForm({ prescription, patientId, consultationId, onClose, inline }: PrescriptionFormProps) {
+const PrescriptionForm: React.FC<PrescriptionFormProps> = ({
+  prescription,
+  patientId,
+  consultationId,
+  inline = false,
+  onClose,
+}) => {
   const { appUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [patients, setPatients] = useState<any[]>([]);
   const [medicamentsList, setMedicamentsList] = useState<any[]>([]);
-
   const [formData, setFormData] = useState({
-    patient_id: prescription?.patient_id || patientId || '',
-    consultation_id: prescription?.consultation_id || consultationId || '',
+    patient_id: patientId || prescription?.patient_id || '',
     date_prescription: prescription?.date_prescription || new Date().toISOString().split('T')[0],
     notes: prescription?.notes || '',
+    consultation_id: consultationId || prescription?.consultation_id || '',
   });
-
   const [medicaments, setMedicaments] = useState<any[]>(
-    prescription?.medicaments || [{ medicament_id: '', posologie: '', duree: '', instructions_speciales: '' }]
+    prescription?.medicaments || [
+      {
+        medicament_id: '',
+        nom: '',
+        dosage: '',
+        forme: '',
+        posologie: '',
+        duree: '',
+        instructions_speciales: '',
+      },
+    ]
   );
-
-  const [suggestionsMap, setSuggestionsMap] = useState<{ [index: number]: PosologieSuggestion[] }>({});
-
-  // *** NOUVEAU: états pour aperçu impression après sauvegarde ***
+  const [suggestionsMap, setSuggestionsMap] = useState<Record<number, PosologieSuggestion[]>>({});
   const [savedPrescription, setSavedPrescription] = useState<any>(null);
   const [showPrintPreview, setShowPrintPreview] = useState(false);
 
-  const applySuggestion = (index: number, suggestionIndex: number = 0) => {
-    const suggestions = suggestionsMap[index];
-    if (suggestions && suggestions[suggestionIndex]) {
-      const newMeds = [...medicaments];
-      newMeds[index].posologie = suggestions[suggestionIndex].posologie;
-      newMeds[index].duree = suggestions[suggestionIndex].duree;
-      newMeds[index].instructions_speciales = suggestions[suggestionIndex].instructions_speciales;
-      setMedicaments(newMeds);
-    }
-  };
-
+  // ─── Charger les patients ───
   useEffect(() => {
     const q = query(collection(db, 'patients'), orderBy('nom'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setPatients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const unsub = onSnapshot(q, (snap) => {
+      setPatients(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
-    return () => unsubscribe();
+    return unsub;
   }, []);
 
+  // ─── Charger les médicaments ───
   useEffect(() => {
-    const q = query(collection(db, 'medicaments'), orderBy('nomMedicament'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setMedicamentsList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const q = query(collection(db, 'medicaments'), orderBy('nom'));
+    const unsub = onSnapshot(q, (snap) => {
+      setMedicamentsList(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
-    return () => unsubscribe();
+    return unsub;
   }, []);
+
+  // ─── Synchroniser patientId prop → formData ───
+  useEffect(() => {
+    if (patientId && patientId !== formData.patient_id) {
+      setFormData((prev) => ({ ...prev, patient_id: patientId }));
+    }
+  }, [patientId]);
+
+  // ─── Synchroniser consultationId prop → formData ───
+  useEffect(() => {
+    if (consultationId && consultationId !== formData.consultation_id) {
+      setFormData((prev) => ({ ...prev, consultation_id: consultationId }));
+    }
+  }, [consultationId]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleMedChange = async (index: number, field: string, value: string) => {
-    const newMeds = [...medicaments];
-    newMeds[index][field] = value;
-    setMedicaments(newMeds);
+    const updated = [...medicaments];
+    updated[index] = { ...updated[index], [field]: value };
 
+    // Si on change le médicament, chercher les suggestions de posologie
     if (field === 'medicament_id' && value) {
+      const med = medicamentsList.find((m) => m.id === value);
+      if (med) {
+        updated[index].nom = med.nom;
+        updated[index].dosage = med.dosage || '';
+        updated[index].forme = med.forme || '';
+      }
+
+      // Chercher les dernières posologies utilisées pour ce médicament
       try {
-        const q = query(
-          collection(db, 'prescriptions'),
-          orderBy('date_prescription', 'desc'),
-          limit(50)
-        );
+        const prescQ = query(collection(db, 'prescriptions'), orderBy('created_at', 'desc'), limit(50));
+        const prescSnap = await getDocs(prescQ);
+        const suggestions: PosologieSuggestion[] = [];
+        const seen = new Set<string>();
 
-        const snapshot = await getDocs(q);
-
-        const foundPosologies: PosologieSuggestion[] = [];
-        const seenKeys = new Set<string>();
-
-        for (const docSnap of snapshot.docs) {
-          const data = docSnap.data();
+        prescSnap.docs.forEach((d) => {
+          const data = d.data();
           if (data.medicaments && Array.isArray(data.medicaments)) {
-            const med = data.medicaments.find((m: any) => m.medicament_id === value);
-            if (med && (med.posologie || med.duree)) {
-              const key = `${(med.posologie || '').trim().toLowerCase()}|${(med.duree || '').trim().toLowerCase()}|${(med.instructions_speciales || '').trim().toLowerCase()}`;
-
-              if (!seenKeys.has(key)) {
-                seenKeys.add(key);
-                foundPosologies.push({
-                  posologie: med.posologie || '',
-                  duree: med.duree || '',
-                  instructions_speciales: med.instructions_speciales || ''
+            data.medicaments.forEach((m: any) => {
+              if (m.medicament_id === value && m.posologie && !seen.has(m.posologie)) {
+                seen.add(m.posologie);
+                suggestions.push({
+                  posologie: m.posologie,
+                  duree: m.duree || '',
+                  instructions_speciales: m.instructions_speciales || '',
                 });
               }
-
-              if (foundPosologies.length >= 5) break;
-            }
+            });
           }
-        }
+        });
 
-        if (foundPosologies.length > 0) {
-          setSuggestionsMap(prev => ({
-            ...prev,
-            [index]: foundPosologies
-          }));
-        } else {
-          setSuggestionsMap(prev => {
-            const newSugg = { ...prev };
-            delete newSugg[index];
-            return newSugg;
-          });
-        }
-      } catch (error) {
-        console.error("Erreur lors de la recherche de suggestions de posologie:", error);
+        setSuggestionsMap((prev) => ({
+          ...prev,
+          [index]: suggestions.slice(0, 5),
+        }));
+      } catch (err) {
+        console.error('Erreur chargement suggestions:', err);
       }
-    } else if (field === 'medicament_id' && !value) {
-      setSuggestionsMap(prev => {
-        const newSugg = { ...prev };
-        delete newSugg[index];
-        return newSugg;
+    }
+
+    setMedicaments(updated);
+  };
+
+  const applySuggestion = (index: number, suggestion: PosologieSuggestion) => {
+    const updated = [...medicaments];
+    updated[index] = {
+      ...updated[index],
+      posologie: suggestion.posologie,
+      duree: suggestion.duree,
+      instructions_speciales: suggestion.instructions_speciales || '',
+    };
+    setMedicaments(updated);
+  };
+
+  const addMedicament = () => {
+    setMedicaments([
+      ...medicaments,
+      {
+        medicament_id: '',
+        nom: '',
+        dosage: '',
+        forme: '',
+        posologie: '',
+        duree: '',
+        instructions_speciales: '',
+      },
+    ]);
+  };
+
+  const removeMedicament = (index: number) => {
+    if (medicaments.length > 1) {
+      setMedicaments(medicaments.filter((_, i) => i !== index));
+      // Nettoyer les suggestions pour cet index
+      setSuggestionsMap((prev) => {
+        const newMap = { ...prev };
+        delete newMap[index];
+        return newMap;
       });
     }
   };
 
-  const addMedicament = () => {
-    setMedicaments([...medicaments, { medicament_id: '', posologie: '', duree: '', instructions_speciales: '' }]);
-  };
-
-  const removeMedicament = (index: number) => {
-    const newMeds = [...medicaments];
-    newMeds.splice(index, 1);
-    setMedicaments(newMeds);
-    setSuggestionsMap(prev => {
-      const newSugg = { ...prev };
-      delete newSugg[index];
-      return newSugg;
-    });
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.patient_id) {
+      alert('Veuillez sélectionner un patient');
+      return;
+    }
+
+    const validMeds = medicaments.filter((m) => m.medicament_id && m.posologie);
+    if (validMeds.length === 0) {
+      alert('Ajoutez au moins un médicament avec sa posologie');
+      return;
+    }
+
     setLoading(true);
-
     try {
-      const validMeds = medicaments
-        .filter(m => m.medicament_id)
-        .map(m => {
-          const medInfo = medicamentsList.find(ml => ml.id === m.medicament_id);
-          return {
-            medicament_id: m.medicament_id,
-            nomMedicament: medInfo?.nomMedicament || medInfo?.nom_commercial || 'Inconnu',
-            posologie: m.posologie || '',
-            duree: m.duree || '',
-            instructions_speciales: m.instructions_speciales || ''
-          };
-        });
+      const patient = patients.find((p) => p.id === formData.patient_id);
+      const patientName = patient ? `${patient.prenom} ${patient.nom}` : '';
 
-      const prescriptionData: any = {
-        patient_id: formData.patient_id || '',
-        consultation_id: formData.consultation_id || '',
-        date_prescription: formData.date_prescription || new Date().toISOString().split('T')[0],
-        notes: formData.notes || '',
+      const payload: any = {
+        patient_id: formData.patient_id,
+        patient_nom: patientName,
+        date_prescription: formData.date_prescription,
         medicaments: validMeds,
+        notes: formData.notes,
+        updated_at: Timestamp.now(),
+        updated_by: appUser?.uid || '',
       };
 
-      Object.keys(prescriptionData).forEach(key => {
-        if (prescriptionData[key] === undefined) {
-          delete prescriptionData[key];
-        }
-      });
+      if (formData.consultation_id) {
+        payload.consultation_id = formData.consultation_id;
+      }
 
       if (prescription?.id) {
-        const updatePayload = {
-          ...prescriptionData,
-          updated_at: new Date().toISOString(),
-        };
-        await updateDoc(doc(db, 'prescriptions', prescription.id), updatePayload);
+        await updateDoc(doc(db, 'prescriptions', prescription.id), payload);
+        // Afficher aperçu impression après mise à jour
+        setSavedPrescription({ id: prescription.id, ...payload });
+        setShowPrintPreview(true);
       } else {
-        const createPayload = {
-          ...prescriptionData,
-          medecin_id: appUser?.uid || 'unknown',
-          created_by: appUser?.uid || 'unknown',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        await addDoc(collection(db, 'prescriptions'), createPayload);
+        payload.created_at = Timestamp.now();
+        payload.created_by = appUser?.uid || '';
+        payload.statut = 'active';
+        const docRef = await addDoc(collection(db, 'prescriptions'), payload);
+        // Afficher aperçu impression après création
+        setSavedPrescription({ id: docRef.id, ...payload });
+        setShowPrintPreview(true);
       }
-
-      // *** MODIFIÉ: au lieu de onClose(), on affiche l'aperçu impression ***
-      const savedData = {
-        ...prescriptionData,
-        medicaments: validMeds,
-      };
-      setSavedPrescription(savedData);
-      setShowPrintPreview(true);
-
-    } catch (error: any) {
-      console.error("Erreur lors de l'enregistrement:", error);
-
-      let errorMessage = "Erreur lors de l'enregistrement de l'ordonnance.";
-
-      if (error.code === 'permission-denied') {
-        errorMessage = "Permission refusée : Vérifiez que tous les champs obligatoires sont remplis (notamment le patient) et que vous avez les droits nécessaires.";
-      } else if (error.message) {
-        errorMessage = `Erreur: ${error.message}`;
-      }
-
-      if (!formData.patient_id) {
-        errorMessage = "Le patient est manquant. Veuillez sélectionner un patient.";
-      }
-
-      alert(errorMessage);
+    } catch (err) {
+      console.error('Erreur sauvegarde ordonnance:', err);
+      alert('Erreur lors de la sauvegarde');
     } finally {
       setLoading(false);
     }
   };
 
-  // =====================================================================
-  // *** CHANGEMENT B: Aperçu impression avec boutons Imprimer + Continuer ***
-  // =====================================================================
+  // ─── Patient options pour react-select ───
+  const patientOptions = patients.map((p) => ({
+    value: p.id,
+    label: `${p.prenom} ${p.nom}`,
+  }));
+
+  const selectedPatient = patientOptions.find((o) => o.value === formData.patient_id) || null;
+
+  // ─── Médicament options pour react-select ───
+  const medOptions = medicamentsList.map((m) => ({
+    value: m.id,
+    label: `${m.nom}${m.dosage ? ' – ' + m.dosage : ''}${m.forme ? ' (' + m.forme + ')' : ''}`,
+  }));
+
+  // ─── APERÇU IMPRESSION ───
   if (showPrintPreview && savedPrescription) {
-    const medsMap: Record<string, any> = {};
-    medicamentsList.forEach(m => { medsMap[m.id] = m; });
-
-    const patientData = patients.find(p => p.id === (savedPrescription.patient_id || formData.patient_id));
-
+    const patient = patients.find((p) => p.id === savedPrescription.patient_id);
     return (
-      <div className={inline ? '' : 'fixed inset-0 z-50'}>
+      <>
         <PrescriptionPrintView
           prescription={savedPrescription}
-          patient={patientData || {}}
-          medicaments={medsMap}
+          patient={patient}
+          medicaments={medicamentsList}
           onClose={onClose}
         />
+        {/* ── Boutons Imprimer / Continuer ── */}
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 print:hidden">
           <button
             onClick={() => window.print()}
-            className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-lg"
+            className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg shadow-lg hover:bg-indigo-700 transition-colors font-medium"
           >
             <Printer className="w-4 h-4" />
             Imprimer
           </button>
           <button
             onClick={onClose}
-            className="flex items-center gap-2 px-5 py-3 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 shadow-lg"
+            className="flex items-center gap-2 px-6 py-3 bg-teal-600 text-white rounded-lg shadow-lg hover:bg-teal-700 transition-colors font-medium"
           >
-            Continuer →
+            Continuer
+            <ArrowRight className="w-4 h-4" />
           </button>
         </div>
-      </div>
+      </>
     );
   }
 
-  // =====================================================================
-  // *** CHANGEMENT C: Formulaire principal — conditionné par inline ***
-  // =====================================================================
+  // ─── FORMULAIRE PRINCIPAL ───
   return (
-    <div className={inline ? '' : 'fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto'}>
-      <div className={inline ? 'bg-white rounded-b-xl shadow-xl w-full relative' : 'bg-white rounded-xl shadow-xl w-full max-w-3xl my-8 relative'}>
-        <div className="flex justify-between items-center p-6 border-b border-slate-200 sticky top-0 bg-white z-10 rounded-t-xl">
-          <h2 className="text-xl font-semibold text-slate-900">
+    <div className={inline ? '' : 'fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto'}>
+      <div className={inline ? 'w-full' : 'bg-white rounded-xl shadow-xl w-full max-w-3xl my-8'}>
+        {/* En-tête */}
+        <div className="flex items-center justify-between p-6 border-b">
+          <h2 className="text-xl font-bold text-gray-800">
             {prescription ? 'Modifier l\'ordonnance' : 'Nouvelle ordonnance'}
           </h2>
           {!inline && (
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-500">
-              <X className="h-6 w-6" />
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+              <X className="w-5 h-5" />
             </button>
           )}
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700">Patient *</label>
-              <select required name="patient_id" value={formData.patient_id} onChange={handleChange} disabled={!!patientId} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 disabled:bg-slate-100">
-                <option value="">Sélectionner un patient</option>
-                {patients.map(p => (
-                  <option key={p.id} value={p.id}>{p.nom} {p.prenom}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700">Date *</label>
-              <input required type="date" name="date_prescription" value={formData.date_prescription} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-medium text-slate-900">Médicaments</h3>
-              <button type="button" onClick={addMedicament} className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200">
-                <Plus className="h-4 w-4 mr-1" /> Ajouter
-              </button>
-            </div>
-
-            {medicaments.map((med, index) => {
-              const suggestions = suggestionsMap[index] || [];
-              const latestSuggestion = suggestions[0] || null;
-
-              return (
-                <div key={index} className="p-4 border border-slate-200 rounded-md bg-slate-50 relative">
-                  <button type="button" onClick={() => removeMedicament(index)} className="absolute top-2 right-2 text-slate-400 hover:text-red-500">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-slate-700 mb-1">Médicament *</label>
-                      <Select
-                        required
-                        value={medicamentsList.find(m => m.id === med.medicament_id) ? {
-                          value: med.medicament_id,
-                          label: `${medicamentsList.find(m => m.id === med.medicament_id)?.nomMedicament || medicamentsList.find(m => m.id === med.medicament_id)?.nom_commercial} ${medicamentsList.find(m => m.id === med.medicament_id)?.dosage ? `- ${medicamentsList.find(m => m.id === med.medicament_id)?.dosage} ${medicamentsList.find(m => m.id === med.medicament_id)?.uniteDosage || ''}` : ''}`
-                        } : null}
-                        onChange={(selectedOption) => handleMedChange(index, 'medicament_id', selectedOption?.value || '')}
-                        options={medicamentsList.filter(m => m.actif !== false || med.medicament_id === m.id).map(m => ({
-                          value: m.id,
-                          label: `${m.nomMedicament || m.nom_commercial} ${m.dosage ? `- ${m.dosage} ${m.uniteDosage || ''}` : ''}${m.actif === false ? ' (Inactif)' : ''}`
-                        }))}
-                        placeholder="Rechercher un médicament..."
-                        isClearable
-                        className="react-select-container"
-                        classNamePrefix="react-select"
-                      />
-                      {med.medicament_id && medicamentsList.find(m => m.id === med.medicament_id) && (
-                        <div className="mt-1 text-xs text-slate-500">
-                          {medicamentsList.find(m => m.id === med.medicament_id)?.forme && (
-                            <span className="mr-3">Forme: {medicamentsList.find(m => m.id === med.medicament_id)?.forme}</span>
-                          )}
-                          {medicamentsList.find(m => m.id === med.medicament_id)?.presentation && (
-                            <span>Présentation: {medicamentsList.find(m => m.id === med.medicament_id)?.presentation}</span>
-                          )}
-                        </div>
-                      )}
-
-                      {suggestions.length > 0 && (
-                        <div className="mt-3 bg-indigo-50 border border-indigo-100 rounded-md p-3 shadow-sm">
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-start flex-1">
-                              <Lightbulb className="h-5 w-5 text-indigo-500 mr-2 mt-0.5 flex-shrink-0" />
-                              <div className="flex-1">
-                                <p className="text-sm font-medium text-indigo-800">Dernière posologie utilisée</p>
-                                <p className="text-xs text-indigo-600 mt-1">
-                                  {latestSuggestion!.posologie} {latestSuggestion!.duree ? `pendant ${latestSuggestion!.duree}` : ''}
-                                </p>
-                                {latestSuggestion!.instructions_speciales && (
-                                  <p className="text-xs text-indigo-500 mt-0.5 italic">
-                                    "{latestSuggestion!.instructions_speciales}"
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => applySuggestion(index, 0)}
-                              className="ml-4 text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1.5 px-3 rounded-md transition-colors flex-shrink-0"
-                            >
-                              Appliquer
-                            </button>
-                          </div>
-
-                          {suggestions.length > 1 && (
-                            <div className="mt-3 pt-3 border-t border-indigo-200">
-                              <label className="block text-xs font-medium text-indigo-700 mb-1.5 flex items-center">
-                                <ChevronDown className="h-3.5 w-3.5 mr-1" />
-                                Historique des posologies ({suggestions.length})
-                              </label>
-                              <select
-                                className="block w-full rounded-md border-indigo-200 bg-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3 py-2"
-                                defaultValue=""
-                                onChange={(e) => {
-                                  const selectedIdx = parseInt(e.target.value, 10);
-                                  if (!isNaN(selectedIdx)) {
-                                    applySuggestion(index, selectedIdx);
-                                    e.target.value = '';
-                                  }
-                                }}
-                              >
-                                <option value="" disabled>Choisir une posologie précédente...</option>
-                                {suggestions.map((sugg, sIdx) => (
-                                  <option key={sIdx} value={sIdx}>
-                                    {sugg.posologie}{sugg.duree ? ` — ${sugg.duree}` : ''}{sugg.instructions_speciales ? ` (${sugg.instructions_speciales})` : ''}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700">Posologie *</label>
-                      <input required type="text" value={med.posologie} onChange={(e) => handleMedChange(index, 'posologie', e.target.value)} placeholder="ex: 1 comprimé matin et soir" className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700">Durée *</label>
-                      <input required type="text" value={med.duree} onChange={(e) => handleMedChange(index, 'duree', e.target.value)} placeholder="ex: 7 jours" className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-slate-700">Instructions spéciales</label>
-                      <input type="text" value={med.instructions_speciales} onChange={(e) => handleMedChange(index, 'instructions_speciales', e.target.value)} placeholder="ex: à prendre au milieu du repas" className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {medicaments.length === 0 && (
-              <p className="text-sm text-slate-500 italic">Aucun médicament ajouté.</p>
+          {/* ── Patient ── */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Patient *</label>
+            {patientId ? (
+              // Patient pré-sélectionné (workflow consultation) — afficher en lecture seule
+              <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700">
+                {selectedPatient?.label || 'Patient sélectionné'}
+              </div>
+            ) : (
+              <Select
+                options={patientOptions}
+                value={selectedPatient}
+                onChange={(opt) =>
+                  setFormData({ ...formData, patient_id: opt?.value || '' })
+                }
+                placeholder="Rechercher un patient..."
+                isClearable
+                classNamePrefix="react-select"
+              />
             )}
           </div>
 
+          {/* ── Date ── */}
           <div>
-            <label className="block text-sm font-medium text-slate-700">Notes</label>
-            <textarea name="notes" rows={2} value={formData.notes} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+            <input
+              type="date"
+              name="date_prescription"
+              value={formData.date_prescription}
+              onChange={handleChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            />
           </div>
 
-          <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
-            <button type="button" onClick={onClose} className="px-4 py-2 border border-slate-300 rounded-md shadow-sm text-sm font-medium text-slate-700 bg-white hover:bg-slate-50">
-              Annuler
-            </button>
-            <button type="submit" disabled={loading} className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50">
-              {loading ? 'Enregistrement...' : 'Enregistrer'}
+          {/* ── Médicaments ── */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <label className="text-sm font-medium text-gray-700">Médicaments</label>
+              <button
+                type="button"
+                onClick={addMedicament}
+                className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800"
+              >
+                <Plus className="w-4 h-4" />
+                Ajouter
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {medicaments.map((med, index) => (
+                <div key={index} className="p-4 border border-gray-200 rounded-lg bg-gray-50 space-y-3">
+                  {/* Ligne médicament */}
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1">
+                      <Select
+                        options={medOptions}
+                        value={medOptions.find((o) => o.value === med.medicament_id) || null}
+                        onChange={(opt) => handleMedChange(index, 'medicament_id', opt?.value || '')}
+                        placeholder="Sélectionner un médicament..."
+                        isClearable
+                        classNamePrefix="react-select"
+                      />
+                    </div>
+                    {medicaments.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeMedicament(index)}
+                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Posologie */}
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Posologie (ex: 1 cp matin et soir)"
+                      value={med.posologie}
+                      onChange={(e) => handleMedChange(index, 'posologie', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                    {/* Suggestions de posologie */}
+                    {suggestionsMap[index] && suggestionsMap[index].length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-xs text-gray-500 mb-1">Suggestions récentes :</p>
+                        <div className="flex flex-wrap gap-1">
+                          {suggestionsMap[index].map((s, si) => (
+                            <button
+                              key={si}
+                              type="button"
+                              onClick={() => applySuggestion(index, s)}
+                              className="text-xs px-2 py-1 bg-indigo-50 text-indigo-700 rounded-full hover:bg-indigo-100 transition-colors"
+                            >
+                              {s.posologie}
+                              {s.duree ? ` (${s.duree})` : ''}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Durée */}
+                  <input
+                    type="text"
+                    placeholder="Durée (ex: 7 jours)"
+                    value={med.duree}
+                    onChange={(e) => handleMedChange(index, 'duree', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+
+                  {/* Instructions spéciales */}
+                  <input
+                    type="text"
+                    placeholder="Instructions spéciales (optionnel)"
+                    value={med.instructions_speciales}
+                    onChange={(e) => handleMedChange(index, 'instructions_speciales', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Notes ── */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <textarea
+              name="notes"
+              value={formData.notes}
+              onChange={handleChange}
+              rows={3}
+              placeholder="Notes supplémentaires..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            />
+          </div>
+
+          {/* ── Boutons ── */}
+          <div className="flex justify-end gap-3 pt-4 border-t">
+            {!inline && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Annuler
+              </button>
+            )}
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 font-medium"
+            >
+              {loading ? 'Enregistrement...' : 'Enregistrer l\'ordonnance'}
             </button>
           </div>
         </form>
       </div>
     </div>
   );
-}
+};
+
+export default PrescriptionForm;
