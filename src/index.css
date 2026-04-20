@@ -1,7 +1,12 @@
 @import "tailwindcss";
 
-/* ====== Styles d'impression globaux ====== */
+/* ====== Styles d'impression ====== */
 @media print {
+
+  /* Supprimer en-tête et pied de page du navigateur (date, URL, titre) */
+  @page {
+    margin: 1.5cm;
+  }
 
   /* Masquer TOUT par défaut */
   body * {
@@ -14,7 +19,7 @@
     visibility: visible !important;
   }
 
-  /* Positionner la zone imprimable en pleine page, centrée */
+  /* Positionner la zone imprimable en pleine page */
   #printable-area {
     position: absolute;
     left: 0;
@@ -22,23 +27,22 @@
     width: 100%;
     z-index: 9999;
     background: white;
-    padding: 2cm;
-    box-sizing: border-box;
+    padding: 0;
   }
 
-  /* Masquer les éléments avec la classe print:hidden */
+  /* Masquer les éléments avec print:hidden */
   .print\:hidden {
     display: none !important;
   }
 
-  /* Pas de coupure dans les tableaux / blocs */
+  /* Pas de coupure dans les blocs */
   table,
   tr,
   .border-l-4 {
     page-break-inside: avoid;
   }
 
-  /* Supprimer les ombres et bordures arrondies */
+  /* Supprimer ombres et bordures arrondies */
   .shadow-xl,
   .shadow-2xl,
   .rounded-xl {

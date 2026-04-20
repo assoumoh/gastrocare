@@ -176,7 +176,7 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                     </div>
 
                     {/* ZONE IMPRIMABLE — même style que PrescriptionPrintView */}
-                    <div className="p-12 print:p-8 bg-white text-black overflow-y-auto grow">
+                    <div id="printable-area" className="p-12 print:p-8 bg-white text-black overflow-y-auto grow">
 
                         {/* En-tête médecin — identique à l'ordonnance */}
                         <div className="text-center mb-12 border-b-2 border-slate-800 pb-6">
