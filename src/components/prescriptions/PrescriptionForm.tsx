@@ -2,14 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { collection, addDoc, updateDoc, doc, query, onSnapshot, orderBy, getDocs, limit } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { X, Plus, Trash2, Lightbulb, ChevronDown } from 'lucide-react';
+import { X, Plus, Trash2, Lightbulb, ChevronDown, Printer } from 'lucide-react'; // *** MODIFIÉ: ajout Printer ***
 import Select from 'react-select';
+import PrescriptionPrintView from './PrescriptionPrintView'; // *** NOUVEAU ***
 
 interface PrescriptionFormProps {
   prescription?: any;
   patientId?: string;
   consultationId?: string;
   onClose: () => void;
+  inline?: boolean;
 }
 
 interface PosologieSuggestion {
@@ -18,7 +20,7 @@ interface PosologieSuggestion {
   instructions_speciales: string;
 }
 
-export default function PrescriptionForm({ prescription, patientId, consultationId, onClose }: PrescriptionFormProps) {
+export default function PrescriptionForm({ prescription, patientId, consultationId, onClose, inline }: PrescriptionFormProps) {
   const { appUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [patients, setPatients] = useState<any[]>([]);
@@ -35,8 +37,11 @@ export default function PrescriptionForm({ prescription, patientId, consultation
     prescription?.medicaments || [{ medicament_id: '', posologie: '', duree: '', instructions_speciales: '' }]
   );
 
-  // Changé : on stocke maintenant un TABLEAU de suggestions (max 5) par index de médicament
   const [suggestionsMap, setSuggestionsMap] = useState<{ [index: number]: PosologieSuggestion[] }>({});
+
+  // *** NOUVEAU: états pour aperçu impression après sauvegarde ***
+  const [savedPrescription, setSavedPrescription] = useState<any>(null);
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
 
   const applySuggestion = (index: number, suggestionIndex: number = 0) => {
     const suggestions = suggestionsMap[index];
@@ -74,10 +79,8 @@ export default function PrescriptionForm({ prescription, patientId, consultation
     newMeds[index][field] = value;
     setMedicaments(newMeds);
 
-    // Si on change le médicament sélectionné
     if (field === 'medicament_id' && value) {
       try {
-        // Chercher dans les 50 dernières ordonnances
         const q = query(
           collection(db, 'prescriptions'),
           orderBy('date_prescription', 'desc'),
@@ -86,7 +89,6 @@ export default function PrescriptionForm({ prescription, patientId, consultation
 
         const snapshot = await getDocs(q);
 
-        // Collecter toutes les posologies distinctes pour ce médicament
         const foundPosologies: PosologieSuggestion[] = [];
         const seenKeys = new Set<string>();
 
@@ -95,7 +97,6 @@ export default function PrescriptionForm({ prescription, patientId, consultation
           if (data.medicaments && Array.isArray(data.medicaments)) {
             const med = data.medicaments.find((m: any) => m.medicament_id === value);
             if (med && (med.posologie || med.duree)) {
-              // Clé unique pour dédupliquer les posologies identiques
               const key = `${(med.posologie || '').trim().toLowerCase()}|${(med.duree || '').trim().toLowerCase()}|${(med.instructions_speciales || '').trim().toLowerCase()}`;
 
               if (!seenKeys.has(key)) {
@@ -107,7 +108,6 @@ export default function PrescriptionForm({ prescription, patientId, consultation
                 });
               }
 
-              // On s'arrête à 5 posologies distinctes
               if (foundPosologies.length >= 5) break;
             }
           }
@@ -145,7 +145,6 @@ export default function PrescriptionForm({ prescription, patientId, consultation
     const newMeds = [...medicaments];
     newMeds.splice(index, 1);
     setMedicaments(newMeds);
-    // Nettoyer les suggestions pour cet index
     setSuggestionsMap(prev => {
       const newSugg = { ...prev };
       delete newSugg[index];
@@ -201,7 +200,15 @@ export default function PrescriptionForm({ prescription, patientId, consultation
         };
         await addDoc(collection(db, 'prescriptions'), createPayload);
       }
-      onClose();
+
+      // *** MODIFIÉ: au lieu de onClose(), on affiche l'aperçu impression ***
+      const savedData = {
+        ...prescriptionData,
+        medicaments: validMeds,
+      };
+      setSavedPrescription(savedData);
+      setShowPrintPreview(true);
+
     } catch (error: any) {
       console.error("Erreur lors de l'enregistrement:", error);
 
@@ -223,23 +230,64 @@ export default function PrescriptionForm({ prescription, patientId, consultation
     }
   };
 
+  // =====================================================================
+  // *** CHANGEMENT B: Aperçu impression avec boutons Imprimer + Continuer ***
+  // =====================================================================
+  if (showPrintPreview && savedPrescription) {
+    const medsMap: Record<string, any> = {};
+    medicamentsList.forEach(m => { medsMap[m.id] = m; });
+
+    const patientData = patients.find(p => p.id === (savedPrescription.patient_id || formData.patient_id));
+
+    return (
+      <div className="fixed inset-0 z-[70]"> {/* *** FIX: toujours fixed + z-[70] pour passer au-dessus du parent z-50 *** */}
+        <PrescriptionPrintView
+          prescription={savedPrescription}
+          patient={patientData || {}}
+          medicaments={medsMap}
+          onClose={onClose}
+        />
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] flex items-center gap-3 print:hidden"> {/* *** FIX: z-[80] au lieu de z-[60] *** */}
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-lg"
+          >
+            <Printer className="w-4 h-4" />
+            Imprimer
+          </button>
+          <button
+            onClick={onClose}
+            className="flex items-center gap-2 px-5 py-3 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 shadow-lg"
+          >
+            Continuer →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // =====================================================================
+  // *** CHANGEMENT C: Formulaire principal — conditionné par inline ***
+  // =====================================================================
   return (
-    <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-8 relative">
+    <div className={inline ? '' : 'fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto'}>
+      <div className={inline ? 'bg-white rounded-b-xl shadow-xl w-full relative' : 'bg-white rounded-xl shadow-xl w-full max-w-3xl my-8 relative'}>
         <div className="flex justify-between items-center p-6 border-b border-slate-200 sticky top-0 bg-white z-10 rounded-t-xl">
           <h2 className="text-xl font-semibold text-slate-900">
             {prescription ? 'Modifier l\'ordonnance' : 'Nouvelle ordonnance'}
           </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-500">
-            <X className="h-6 w-6" />
-          </button>
+          {!inline && (
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-500">
+              <X className="h-6 w-6" />
+            </button>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700">Patient *</label>
-              <select required name="patient_id" value={formData.patient_id} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2">
+              <select required name="patient_id" value={formData.patient_id} onChange={handleChange} disabled={!!patientId} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2 disabled:bg-slate-100">
                 <option value="">Sélectionner un patient</option>
                 {patients.map(p => (
                   <option key={p.id} value={p.id}>{p.nom} {p.prenom}</option>
@@ -299,7 +347,6 @@ export default function PrescriptionForm({ prescription, patientId, consultation
                         </div>
                       )}
 
-                      {/* ── Bloc suggestions posologie (NOUVEAU : 5 dernières) ── */}
                       {suggestions.length > 0 && (
                         <div className="mt-3 bg-indigo-50 border border-indigo-100 rounded-md p-3 shadow-sm">
                           <div className="flex items-start justify-between">
@@ -326,7 +373,6 @@ export default function PrescriptionForm({ prescription, patientId, consultation
                             </button>
                           </div>
 
-                          {/* Liste déroulante des 5 dernières posologies distinctes */}
                           {suggestions.length > 1 && (
                             <div className="mt-3 pt-3 border-t border-indigo-200">
                               <label className="block text-xs font-medium text-indigo-700 mb-1.5 flex items-center">
