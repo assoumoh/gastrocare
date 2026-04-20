@@ -34,16 +34,23 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
 
   const champsPreConsult = useMemo(() => {
     if (settings?.champs_pre_consultation && Array.isArray(settings.champs_pre_consultation)) {
+      // Utiliser les champs des settings, en s'assurant que id = nom (compatibilité PreConsultationForm)
       return [...settings.champs_pre_consultation]
         .filter((c: ChampPreConsultation) => c.actif)
-        .sort((a: ChampPreConsultation, b: ChampPreConsultation) => a.ordre - b.ordre);
+        .sort((a: ChampPreConsultation, b: ChampPreConsultation) => a.ordre - b.ordre)
+        .map((c: any) => ({ ...c, id: c.id || c.nom }));
     }
     return [
       { id: 'poids', label: 'Poids', type: 'number' as const, unite: 'kg', actif: true, ordre: 1 },
       { id: 'tension_systolique', label: 'Tension systolique', type: 'number' as const, unite: 'mmHg', actif: true, ordre: 2 },
       { id: 'tension_diastolique', label: 'Tension diastolique', type: 'number' as const, unite: 'mmHg', actif: true, ordre: 3 },
+      { id: 'glycemie', label: 'Glycémie', type: 'number' as const, unite: 'g/L', actif: true, ordre: 4 },
+      { id: 'temperature', label: 'Température', type: 'number' as const, unite: '°C', actif: true, ordre: 5 },
+      { id: 'saturation_o2', label: 'Saturation O₂', type: 'number' as const, unite: '%', actif: true, ordre: 6 },
+      { id: 'frequence_cardiaque', label: 'Fréquence cardiaque', type: 'number' as const, unite: 'bpm', actif: true, ordre: 7 },
     ];
   }, [settings]);
+
 
   const buildInitialFormData = () => {
     const base: Record<string, any> = {
