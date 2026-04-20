@@ -59,31 +59,33 @@ const PreConsultationForm: React.FC<PreConsultationFormProps> = ({
         observations_pre_consultation: '',
     });
 
-    // Champs dynamiques depuis les settings, avec déduplication par nom
     const champsPreConsultation = (() => {
         const raw = settings?.champs_pre_consultation?.filter(
             (c: any) => c.actif !== false
         );
         if (!raw || raw.length === 0) return DEFAULT_CHAMPS;
 
-        // Fusionner : settings + DEFAULT_CHAMPS manquants
+        // Fusionner settings + DEFAULT_CHAMPS manquants, déduplication par nom normalisé
         const seen = new Set<string>();
         const merged: any[] = [];
         raw.forEach((c: any) => {
-            if (!seen.has(c.nom)) {
-                seen.add(c.nom);
+            const key = (c.nom || '').toLowerCase().trim();
+            if (!seen.has(key)) {
+                seen.add(key);
                 merged.push(c);
             }
         });
-        // Ajouter les champs par défaut qui ne sont pas dans les settings
         DEFAULT_CHAMPS.forEach((c) => {
-            if (!seen.has(c.nom)) {
-                seen.add(c.nom);
+            const key = (c.nom || '').toLowerCase().trim();
+            if (!seen.has(key)) {
+                seen.add(key);
                 merged.push(c);
             }
         });
         return merged;
     })();
+
+
 
 
     // Charger données patient + consultation existante
