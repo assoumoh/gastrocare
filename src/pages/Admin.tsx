@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDoc, where } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDoc, where, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Plus, Edit2, Trash2, Shield, UserCheck, UserX, Key, AlertTriangle, X } from 'lucide-react';
+import { Plus, Edit2, Trash2, Shield, UserCheck, UserX, Key, AlertTriangle, X, Flame } from 'lucide-react';
 import UserForm from '../components/admin/UserForm';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -59,6 +59,45 @@ export default function Admin() {
       setSaveCodeMessage('Erreur lors de l\'enregistrement');
     } finally {
       setIsSavingCode(false);
+    }
+  };
+
+  // ── Reset data ──
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
+
+  const COLLECTIONS_TO_CLEAR = [
+    'patients', 'consultations', 'file_attente', 'appointments',
+    'payments', 'exams', 'prescriptions', 'documents',
+  ];
+
+  const handleResetData = async () => {
+    if (resetConfirmText !== 'REINITIALISER') return;
+    setIsResetting(true);
+    try {
+      for (const colName of COLLECTIONS_TO_CLEAR) {
+        const snap = await getDocs(collection(db, colName));
+        let batch = writeBatch(db);
+        let cnt = 0;
+        for (const d of snap.docs) {
+          batch.delete(doc(db, colName, d.id));
+          cnt++;
+          if (cnt === 499) {
+            await batch.commit();
+            batch = writeBatch(db);
+            cnt = 0;
+          }
+        }
+        if (cnt > 0) await batch.commit();
+      }
+      setResetDone(true);
+    } catch (err) {
+      console.error('Erreur reset:', err);
+      alert('Erreur lors de la réinitialisation. Vérifiez la console.');
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -288,6 +327,101 @@ export default function Admin() {
           user={selectedUser}
           onClose={handleCloseForm}
         />
+      )}
+
+      {/* ── Zone de danger : réinitialisation des données ── */}
+      <div className="bg-white shadow rounded-lg overflow-hidden border border-red-200 mt-8">
+        <div className="px-4 py-5 sm:px-6 bg-red-50 flex items-center gap-3">
+          <Flame className="w-5 h-5 text-red-600" />
+          <h3 className="text-lg font-semibold text-red-800">Zone de danger</h3>
+        </div>
+        <div className="px-4 py-5 sm:px-6">
+          <p className="text-sm text-slate-600 mb-1">
+            <strong>Réinitialiser toutes les données</strong> — supprime définitivement tous les patients, consultations, rendez-vous, paiements, examens, ordonnances et la file d'attente.
+          </p>
+          <p className="text-xs text-slate-400 mb-4">Les médicaments et les comptes utilisateurs sont préservés.</p>
+          <button
+            onClick={() => { setShowResetModal(true); setResetConfirmText(''); setResetDone(false); }}
+            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700"
+          >
+            <Flame className="w-4 h-4" />
+            Réinitialiser les données
+          </button>
+        </div>
+      </div>
+
+      {/* Modal confirmation reset */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/50" onClick={() => !isResetting && setShowResetModal(false)} />
+          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6 z-50">
+            {resetDone ? (
+              <div className="text-center py-4">
+                <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+                  <Shield className="w-6 h-6 text-green-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-slate-900 mb-2">Réinitialisation terminée</h3>
+                <p className="text-sm text-slate-500 mb-6">Toutes les données ont été supprimées. Les médicaments et comptes sont intacts.</p>
+                <button
+                  onClick={() => setShowResetModal(false)}
+                  className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+                >
+                  Fermer
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 bg-red-100 rounded-lg">
+                    <AlertTriangle className="w-5 h-5 text-red-600" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-slate-900">Confirmer la réinitialisation</h3>
+                </div>
+                <p className="text-sm text-slate-600 mb-4">
+                  Cette action est <strong>irréversible</strong>. Toutes les données cliniques seront supprimées définitivement.
+                </p>
+                <p className="text-sm font-medium text-slate-700 mb-2">
+                  Tapez <span className="font-mono bg-red-50 text-red-700 px-1 rounded">REINITIALISER</span> pour confirmer :
+                </p>
+                <input
+                  type="text"
+                  value={resetConfirmText}
+                  onChange={e => setResetConfirmText(e.target.value)}
+                  placeholder="REINITIALISER"
+                  disabled={isResetting}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-5 focus:border-red-400 focus:ring-red-400"
+                  autoFocus
+                />
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowResetModal(false)}
+                    disabled={isResetting}
+                    className="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={handleResetData}
+                    disabled={isResetting || resetConfirmText !== 'REINITIALISER'}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {isResetting ? (
+                      <>
+                        <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Suppression...
+                      </>
+                    ) : (
+                      <>
+                        <Flame className="w-4 h-4" />
+                        Réinitialiser
+                      </>
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Delete Confirmation Modal */}
