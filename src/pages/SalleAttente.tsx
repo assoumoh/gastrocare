@@ -234,15 +234,10 @@ const SalleAttente: React.FC = () => {
             consultationId: entry.consultation_id,
         };
 
-        if (appUser?.role === 'assistante') {
-            // Assistante → voir les notes du médecin, puis checklist
-            setDoctorNotesTarget(data); // *** MODIFIÉ ***
-        } else {
-            // Médecin → workflow examens → ordonnance → checklist
-            setWorkflowData(data);
-            setWorkflowStep('exams');
-        }
+        // Toujours : Notes médecin → checklist post-consultation
+        setDoctorNotesTarget(data);
     };
+
 
     const handleExamComplete = () => {
         setWorkflowStep('prescription');
