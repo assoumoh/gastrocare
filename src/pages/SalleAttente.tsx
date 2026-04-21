@@ -715,6 +715,7 @@ const SalleAttente: React.FC = () => {
             {doctorNotesTarget && (
                 <DoctorNotesModal
                     consultationId={doctorNotesTarget.consultationId}
+                    patientId={doctorNotesTarget.patientId}
                     patientName={doctorNotesTarget.patientName}
                     onContinue={() => {
                         // Après lecture des notes → passer au checklist post-consultation

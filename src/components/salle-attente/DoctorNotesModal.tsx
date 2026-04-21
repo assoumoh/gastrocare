@@ -1,17 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { X, FileText, ArrowRight, Loader2 } from 'lucide-react';
 
 interface DoctorNotesModalProps {
     consultationId?: string;
+    patientId?: string;
     patientName: string;
     onContinue: () => void;
     onClose: () => void;
 }
 
+const hasMedicalContent = (c: any): boolean =>
+    !!(c?.notes || c?.diagnostic_principal || c?.conduite_a_tenir ||
+        c?.synthese || c?.observations || c?.prescription || c?.note_pour_assistante);
+
 export default function DoctorNotesModal({
     consultationId,
+    patientId,
     patientName,
     onContinue,
     onClose,
@@ -21,23 +27,53 @@ export default function DoctorNotesModal({
 
     useEffect(() => {
         const fetchConsultation = async () => {
-            if (!consultationId) {
-                setLoading(false);
-                return;
-            }
-            try {
-                const snap = await getDoc(doc(db, 'consultations', consultationId));
-                if (snap.exists()) {
-                    setConsultationData(snap.data());
+            let data: any = null;
+
+            // 1) Essayer avec l'ID direct
+            if (consultationId) {
+                try {
+                    const snap = await getDoc(doc(db, 'consultations', consultationId));
+                    if (snap.exists()) {
+                        data = snap.data();
+                    }
+                } catch (err) {
+                    console.error('Erreur chargement consultation par ID:', err);
                 }
-            } catch (err) {
-                console.error('Erreur chargement consultation:', err);
-            } finally {
-                setLoading(false);
             }
+
+            // 2) Si la consultation directe n'a pas de contenu médical, chercher
+            //    parmi toutes les consultations du patient pour aujourd'hui
+            if (!hasMedicalContent(data) && patientId) {
+                try {
+                    const today = new Date().toISOString().split('T')[0];
+                    const q = query(
+                        collection(db, 'consultations'),
+                        where('patient_id', '==', patientId)
+                    );
+                    const snap = await getDocs(q);
+                    const candidates = snap.docs
+                        .map(d => ({ id: d.id, ...d.data() }))
+                        .filter((c: any) => c.date_consultation === today && hasMedicalContent(c));
+
+                    // Prendre la plus récemment mise à jour
+                    candidates.sort((a: any, b: any) =>
+                        (b.updated_at || '').localeCompare(a.updated_at || '')
+                    );
+
+                    if (candidates.length > 0) {
+                        data = candidates[0];
+                    }
+                } catch (err) {
+                    console.error('Erreur fallback query par patient_id:', err);
+                }
+            }
+
+            setConsultationData(data);
+            setLoading(false);
         };
+
         fetchConsultation();
-    }, [consultationId]);
+    }, [consultationId, patientId]);
 
     const notes = consultationData?.notes || '';
     const diagnostic = consultationData?.diagnostic_principal || '';
@@ -46,8 +82,7 @@ export default function DoctorNotesModal({
     const observations = consultationData?.observations || '';
     const noteAssistante = consultationData?.note_pour_assistante || '';
 
-
-    const hasContent = notes || diagnostic || conduiteATenir || synthese || observations;
+    const hasContent = notes || diagnostic || conduiteATenir || synthese || observations || noteAssistante;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -83,6 +118,12 @@ export default function DoctorNotesModal({
                         </div>
                     ) : (
                         <div className="space-y-4">
+                            {noteAssistante && (
+                                <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
+                                    <h4 className="text-xs font-semibold text-teal-800 uppercase tracking-wider mb-1">Message du médecin pour vous</h4>
+                                    <p className="text-sm text-slate-800 whitespace-pre-wrap">{noteAssistante}</p>
+                                </div>
+                            )}
                             {diagnostic && (
                                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
                                     <h4 className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-1">Diagnostic</h4>
@@ -113,13 +154,6 @@ export default function DoctorNotesModal({
                                     <p className="text-sm text-slate-800 whitespace-pre-wrap font-mono">{notes}</p>
                                 </div>
                             )}
-                            {noteAssistante && (
-                                <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
-                                    <h4 className="text-xs font-semibold text-teal-800 uppercase tracking-wider mb-1">Message du médecin pour vous</h4>
-                                    <p className="text-sm text-slate-800 whitespace-pre-wrap">{noteAssistante}</p>
-                                </div>
-                            )}
-
                         </div>
                     )}
                 </div>
