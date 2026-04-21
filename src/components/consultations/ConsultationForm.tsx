@@ -573,6 +573,51 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
 
             <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
               <h4 className="text-sm font-semibold text-slate-900 mb-2">Pré-consultation (Assistante)</h4>
+
+              {/* ── Données pré-consultation saisies par l'assistante (lecture seule) ── */}
+              {(() => {
+                const pc = consultation?.pre_consultation;
+                if (!pc) return null;
+                const FIELDS: { key: string; label: string; unite: string }[] = [
+                  { key: 'poids', label: 'Poids', unite: 'kg' },
+                  { key: 'tension', label: 'Tension', unite: 'mmHg' },
+                  { key: 'temperature', label: 'Température', unite: '°C' },
+                  { key: 'glycemie', label: 'Glycémie', unite: 'g/L' },
+                  { key: 'saturation_o2', label: 'Saturation O₂', unite: '%' },
+                  { key: 'frequence_cardiaque', label: 'Fréq. cardiaque', unite: 'bpm' },
+                ];
+                const visibleFields = FIELDS.filter(f => pc[f.key] !== null && pc[f.key] !== undefined && pc[f.key] !== '');
+                if (visibleFields.length === 0 && !pc.allergies && !pc.observations_pre_consultation) return null;
+                return (
+                  <div className="mb-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                    <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider mb-2">
+                      Constantes saisies par l'assistante
+                      {pc.realise_par_nom ? <span className="normal-case font-normal ml-1 text-indigo-500">— {pc.realise_par_nom}</span> : null}
+                    </p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      {visibleFields.map(f => (
+                        <div key={f.key} className="text-sm">
+                          <span className="text-slate-500">{f.label} :</span>{' '}
+                          <span className="font-medium text-slate-800">{pc[f.key]} <span className="text-xs text-slate-400">{f.unite}</span></span>
+                        </div>
+                      ))}
+                      {pc.allergies && (
+                        <div className="col-span-2 md:col-span-3 text-sm">
+                          <span className="text-slate-500">Allergies :</span>{' '}
+                          <span className="font-medium text-red-700">{pc.allergies}</span>
+                        </div>
+                      )}
+                      {pc.observations_pre_consultation && (
+                        <div className="col-span-2 md:col-span-3 text-sm">
+                          <span className="text-slate-500">Observations :</span>{' '}
+                          <span className="font-medium text-slate-800">{pc.observations_pre_consultation}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {champsPreConsult.map((champ) => (
                   <div key={champ.id}>
