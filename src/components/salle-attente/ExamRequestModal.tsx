@@ -164,11 +164,43 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
 
         return (
             <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto print:bg-white print:p-0">
-                {/* Styles d'impression : saut de page entre documents */}
+                {/* Styles d'impression : saut de page entre documents + isolation de la zone imprimable */}
                 <style>{`
                     @media print {
-                        .exam-doc-page { break-after: page; page-break-after: always; }
-                        .exam-doc-page:last-child { break-after: auto; page-break-after: auto; }
+                        @page { margin: 0; }
+                        html, body {
+                            margin: 0 !important;
+                            padding: 0 !important;
+                            height: auto !important;
+                            overflow: visible !important;
+                            background: #fff !important;
+                        }
+                        /* Masquer tout le reste de l'app */
+                        body * { visibility: hidden !important; }
+                        /* Ne révéler QUE la zone imprimable et ses descendants */
+                        #printable-area, #printable-area * { visibility: visible !important; }
+                        /* Sortir la zone du flux et lever toutes les contraintes de hauteur/overflow */
+                        #printable-area {
+                            position: absolute !important;
+                            left: 0 !important;
+                            top: 0 !important;
+                            width: 100% !important;
+                            height: auto !important;
+                            max-height: none !important;
+                            overflow: visible !important;
+                            background: #fff !important;
+                        }
+                        /* Saut de page forcé entre documents */
+                        .exam-doc-page {
+                            break-after: page;
+                            page-break-after: always;
+                            break-inside: avoid;
+                            page-break-inside: avoid;
+                        }
+                        .exam-doc-page:last-child {
+                            break-after: auto;
+                            page-break-after: auto;
+                        }
                     }
                 `}</style>
 
