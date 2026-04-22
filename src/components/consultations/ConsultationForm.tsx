@@ -3,7 +3,7 @@ import { collection, addDoc, updateDoc, doc, query, onSnapshot, orderBy } from '
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../hooks/useSettings';
-import { X, Sparkles, FlaskConical, Pill, MessageSquare } from 'lucide-react'; // *** MODIFIÉ ***
+import { X, Sparkles, FlaskConical, Pill, MessageSquare, ClipboardList } from 'lucide-react'; // *** MODIFIÉ ***
 import { aiService } from '../../services/aiService';
 import type { ChampPreConsultation } from '../../types';
 import ExamRequestModal from '../salle-attente/ExamRequestModal';
@@ -647,6 +647,40 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
 
             {appUser?.role !== 'assistante' && (
               <>
+                {/* ── Évo 1 : Infos Patient (antécédents consolidés, lecture seule) ── */}
+                {(() => {
+                  const p = patients.find((pt: any) => pt.id === formData.patient_id);
+                  if (!p) return null;
+                  const items: { label: string; value: string }[] = [
+                    { label: 'Antécédents médicaux', value: p.antecedents_medicaux || '' },
+                    { label: 'Antécédents familiaux', value: p.antecedents_familiaux || '' },
+                    { label: 'Antécédents chirurgicaux', value: p.antecedents_chirurgicaux || '' },
+                    { label: 'Habitudes toxiques', value: p.habitudes_toxiques || '' },
+                    { label: 'Traitement en cours', value: p.traitement_en_cours || p.traitements_chroniques || '' },
+                  ];
+                  const visible = items.filter(i => String(i.value).trim() !== '');
+                  return (
+                    <div className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-4">
+                      <h4 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
+                        <ClipboardList className="w-4 h-4" />
+                        Infos Patient
+                      </h4>
+                      {visible.length === 0 ? (
+                        <p className="text-sm text-amber-700 italic">Aucun antécédent renseigné pour ce patient.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {visible.map(i => (
+                            <div key={i.label}>
+                              <p className="text-xs font-semibold text-amber-800 uppercase tracking-wider">{i.label}</p>
+                              <p className="text-sm text-slate-800 whitespace-pre-wrap mt-0.5">{i.value}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <div className="pt-4 border-t border-slate-200">
                   <h4 className="text-sm font-semibold text-slate-900 mb-4">Consultation Médicale</h4>
                 </div>
