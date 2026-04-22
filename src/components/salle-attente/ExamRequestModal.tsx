@@ -6,6 +6,7 @@ import {
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../hooks/useSettings';
+import { buildDocuments, printDocuments } from '../../utils/examPrint';
 import {
     X,
     Plus,
@@ -63,155 +64,6 @@ const EXAM_TYPES: Record<string, string[]> = {
     Autre: ['Autre'],
 };
 
-/** Regroupe les examens : biologie → 1 doc, autres types → 1 doc par examen */
-function buildDocuments(exams: ExamEntry[]) {
-    const biologieExams = exams.filter(e => e.type_examen === 'Biologie');
-    const otherExams    = exams.filter(e => e.type_examen !== 'Biologie');
-    const docs: { key: string; exams: ExamEntry[]; note: string }[] = [];
-
-    if (biologieExams.length > 0) {
-        const mergedNote = biologieExams.map(e => e.commentaire?.trim()).filter(Boolean).join(' · ');
-        docs.push({ key: 'biologie', exams: biologieExams, note: mergedNote });
-    }
-    otherExams.forEach((e, i) => {
-        docs.push({ key: `other-${i}`, exams: [e], note: (e.commentaire || '').trim() });
-    });
-    return docs;
-}
-
-/** Ouvre une nouvelle fenêtre vierge et lance l'impression — aucune dépendance
- *  vis-à-vis du DOM React, des modals, de Tailwind ou des media queries. */
-function printDocuments(
-    documents: { key: string; exams: ExamEntry[]; note: string }[],
-    patientName: string,
-    cabinetSettings?: {
-        nom_cabinet?: string;
-        specialite?: string;
-        adresse_cabinet?: string;
-        numero_ordre?: string;
-        inpe?: string;
-    },
-) {
-    const pw = window.open('', '_blank');
-    if (!pw) {
-        alert("Veuillez autoriser les popups pour ce site afin d'imprimer.");
-        return;
-    }
-
-    const today = new Date().toLocaleDateString('fr-FR');
-
-    const escHtml = (s: string) =>
-        s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-    // Infos cabinet dynamiques avec fallback
-    const nomCabinet   = cabinetSettings?.nom_cabinet   || 'Docteur';
-    const specialite   = cabinetSettings?.specialite    || '';
-    const adresse      = cabinetSettings?.adresse_cabinet || '';
-    const numeroOrdre  = cabinetSettings?.numero_ordre  || '';
-    const inpe         = cabinetSettings?.inpe          || '';
-
-    const piedPage = (numeroOrdre || inpe)
-        ? `<div class="footer-info">${numeroOrdre ? `N° Ordre : ${escHtml(numeroOrdre)}` : ''}${numeroOrdre && inpe ? '&emsp;|&emsp;' : ''}${inpe ? `INPE : ${escHtml(inpe)}` : ''}</div>`
-        : '';
-
-    const pages = documents.map(docu => `
-        <div class="page">
-            <div class="header">
-                <h1>${escHtml(nomCabinet)}</h1>
-                ${specialite ? `<p class="sub">${escHtml(specialite)}</p>` : ''}
-                ${adresse    ? `<p class="sub">${escHtml(adresse)}</p>`    : ''}
-            </div>
-
-            <div class="title-wrap">
-                <span class="title-box">Demande d&rsquo;Examens Complémentaires</span>
-            </div>
-
-            <div class="patient-row">
-                <span><strong>Patient&nbsp;:</strong>&nbsp;${escHtml(patientName)}</span>
-                <span>Le&nbsp;${today}</span>
-            </div>
-
-            ${docu.note ? `
-            <div class="note">
-                <strong>Note&nbsp;:</strong>&nbsp;${escHtml(docu.note)}
-            </div>` : ''}
-
-            <div class="exams">
-                ${docu.exams.map(e => `
-                <div class="exam-item">&bull;&nbsp;${escHtml(e.nom_examen)}</div>
-                `).join('')}
-            </div>
-
-            <div class="signature">
-                <span>Signature&nbsp;/&nbsp;Cachet</span>
-                <div class="sig-line"></div>
-            </div>
-            ${piedPage}
-        </div>
-    `).join('\n');
-
-    pw.document.write(`<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8">
-<title>Demandes d'examens — ${escHtml(patientName)}</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, Helvetica, sans-serif; background: #fff; color: #111; }
-
-  @page { size: A4; margin: 1.5cm; }
-
-  /* Chaque .page = une feuille A4 */
-  .page {
-    width: 100%;
-    min-height: 24cm;          /* occupe toute la feuille */
-    display: flex;
-    flex-direction: column;
-    padding-bottom: 0.5cm;
-  }
-  /* Saut de page ENTRE pages (pas de trailing blank page) */
-  .page + .page { page-break-before: always; }
-
-  /* En-tête médecin */
-  .header { text-align: center; border-bottom: 2px solid #111; padding-bottom: 1rem; margin-bottom: 2rem; }
-  .header h1 { font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; }
-  .header .sub { font-size: 12px; color: #555; margin-top: 3px; }
-
-  /* Titre encadré */
-  .title-wrap { text-align: center; margin-bottom: 2rem; }
-  .title-box {
-    font-size: 13px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 2px; border: 2px solid #111;
-    display: inline-block; padding: 7px 20px;
-  }
-
-  /* Ligne patient / date */
-  .patient-row { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 2rem; }
-
-  /* Note */
-  .note { background: #f5f5f5; border-left: 4px solid #888; padding: 10px 14px; margin-bottom: 1.5rem; font-size: 13px; }
-
-  /* Liste examens */
-  .exams { flex: 1; margin-bottom: 1rem; }
-  .exam-item { font-size: 15px; font-weight: 700; padding: 7px 0 7px 14px; border-left: 4px solid #ccc; margin-bottom: 8px; }
-
-  /* Signature en bas */
-  .signature { margin-top: auto; text-align: right; padding-top: 2rem; }
-  .signature span { font-size: 13px; font-weight: 600; display: block; margin-bottom: 2.5rem; }
-  .sig-line { width: 160px; border-bottom: 1px solid #999; margin-left: auto; }
-  .footer-info { text-align: center; font-size: 11px; color: #777; border-top: 1px solid #ddd; padding-top: 8px; margin-top: 1rem; }
-</style>
-</head>
-<body>
-${pages}
-</body>
-</html>`);
-
-    pw.document.close();
-    // Laisser le temps au navigateur de rendre avant d'ouvrir la boîte d'impression
-    setTimeout(() => { pw.focus(); pw.print(); }, 400);
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
@@ -255,13 +107,16 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
 
         setSaving(true);
         try {
-            const now   = new Date().toISOString();
-            const today = now.split('T')[0];
+            const now      = new Date().toISOString();
+            const today    = now.split('T')[0];
+            // Identifiant unique partagé par tous les examens de cette demande
+            const demandeId = `dmnd_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 
             for (const exam of exams) {
                 await addDoc(collection(db, 'exams'), {
                     patient_id:      patientId,
                     consultation_id: consultationId || null,
+                    demande_id:      demandeId,
                     type_examen:     exam.type_examen,
                     nom_examen:      exam.nom_examen,
                     commentaire:     exam.commentaire || '',
