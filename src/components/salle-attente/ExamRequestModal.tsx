@@ -193,10 +193,8 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                             inset: auto !important;
                         }
 
-                        /* 3) Aplatir le shell du modal (le .fixed, son enfant blanc, puis les enfants
-                              internes sauf #printable-area) : pas de flex, pas de marges, pas de
-                              largeur max, pas d'ombre. Le contenu imprimable commence ainsi en haut
-                              de la page. */
+                        /* 3) Aplatir le shell du modal : pas de flex, pas de marges, pas de
+                              largeur max, pas d'ombre → le contenu imprimable commence en haut. */
                         .fixed, .fixed > div, .fixed > div > div {
                             display: block !important;
                             margin: 0 !important;
@@ -208,6 +206,11 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                             border: none !important;
                             background: transparent !important;
                         }
+
+                        /* 3b) Ré-appliquer display:none sur les éléments print:hidden que la
+                               règle ci-dessus aurait écrasés (header + footer du modal).
+                               Sans ça, ils occupent de l'espace en haut et décalent le 1er doc. */
+                        .print\\:hidden { display: none !important; }
 
                         /* 4) Révéler uniquement la zone imprimable et ses descendants */
                         #printable-area, #printable-area * {
