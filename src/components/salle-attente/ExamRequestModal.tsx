@@ -167,7 +167,7 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                 {/* Styles d'impression : une page par demande d'examen */}
                 <style>{`
                     @media print {
-                        @page { margin: 1cm; }
+                        @page { margin: 1.5cm; }
 
                         html, body {
                             margin: 0 !important;
@@ -179,40 +179,70 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                             background: #fff !important;
                         }
 
-                        /* 1) Masquer tout, et neutraliser les contraintes qui tronquent l'impression
-                              (overflow caché, hauteurs max, positionnements fixes/absolus) */
+                        /* 1) Masquer tout le reste de l'app */
                         body * {
                             visibility: hidden !important;
                             overflow: visible !important;
                             max-height: none !important;
                             height: auto !important;
                         }
+
+                        /* 2) Neutraliser toutes les containers fixes/absolus */
                         .fixed, .absolute, .sticky {
                             position: static !important;
                             inset: auto !important;
                         }
 
-                        /* 2) Révéler uniquement la zone imprimable et ses descendants */
+                        /* 3) Aplatir le shell du modal (le .fixed, son enfant blanc, puis les enfants
+                              internes sauf #printable-area) : pas de flex, pas de marges, pas de
+                              largeur max, pas d'ombre. Le contenu imprimable commence ainsi en haut
+                              de la page. */
+                        .fixed, .fixed > div, .fixed > div > div {
+                            display: block !important;
+                            margin: 0 !important;
+                            padding: 0 !important;
+                            max-width: none !important;
+                            width: auto !important;
+                            box-shadow: none !important;
+                            border-radius: 0 !important;
+                            border: none !important;
+                            background: transparent !important;
+                        }
+
+                        /* 4) Révéler uniquement la zone imprimable et ses descendants */
                         #printable-area, #printable-area * {
                             visibility: visible !important;
                         }
                         #printable-area {
                             display: block !important;
                             background: #fff !important;
+                            margin: 0 !important;
+                            padding: 0 !important;
                         }
 
-                        /* 3) Saut de page forcé entre chaque demande d'examen */
+                        /* 5) Saut de page forcé entre chaque demande d'examen */
                         .exam-doc-page {
                             break-after: page !important;
                             page-break-after: always !important;
-                            break-inside: avoid-page !important;
-                            page-break-inside: avoid !important;
                             border: none !important;
+                            padding: 0 !important;
+                            margin: 0 !important;
                         }
                         .exam-doc-page:last-child {
                             break-after: auto !important;
                             page-break-after: auto !important;
                         }
+
+                        /* 6) Réduire l'espacement écran gigantesque qui faisait déborder sur une
+                              2e page et tassait la mise en page. */
+                        .exam-doc-page .mb-12 { margin-bottom: 1.5rem !important; }
+                        .exam-doc-page .mb-10 { margin-bottom: 1.25rem !important; }
+                        .exam-doc-page .mb-8  { margin-bottom: 1rem !important; }
+                        .exam-doc-page .mb-16 { margin-bottom: 1.5rem !important; }
+                        .exam-doc-page .mt-20 { margin-top: 2.5rem !important; }
+                        .exam-doc-page .mt-16 { margin-top: 2rem !important; }
+                        .exam-doc-page .pb-6  { padding-bottom: 1rem !important; }
+                        .exam-doc-page [class*="min-h-"] { min-height: 0 !important; }
                     }
                 `}</style>
 
