@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { Calendar, Stethoscope, Edit, DollarSign, FileText, Pill, Search } from 'lucide-react';
+import { Calendar, Stethoscope, Edit, DollarSign, FileText, Pill } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import ConsultationForm from '../consultations/ConsultationForm';
+import SmartFilterBar from '../shared/SmartFilterBar';
+import { matchPeriod, type PeriodId } from '../../utils/filterHelpers';
 
 interface PatientConsultationsProps {
   patientId: string;
@@ -26,9 +28,12 @@ export default function PatientConsultations({ patientId }: PatientConsultations
   const [editingConsultation, setEditingConsultation] = useState<any | null>(null);
   const [autoOpened, setAutoOpened] = useState(false);
 
-  // Filters
-  const [dateDebut, setDateDebut] = useState('');
-  const [dateFin, setDateFin] = useState('');
+  // Smart filters
+  const [search, setSearch]         = useState('');
+  const [period, setPeriod]         = useState<PeriodId>('all');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd]     = useState('');
+  const [statut, setStatut]         = useState<string>('all');
 
   useEffect(() => {
     // Essayer avec orderBy, fallback sans orderBy si index manquant
@@ -116,11 +121,42 @@ export default function PatientConsultations({ patientId }: PatientConsultations
     return () => unsubscribePrescriptions();
   }, [patientId]);
 
-  const filteredConsultations = consultations.filter(c => {
-    if (dateDebut && c.date_consultation < dateDebut) return false;
-    if (dateFin && c.date_consultation > dateFin) return false;
-    return true;
-  });
+  // ── Comptage par statut pour les chips ─────────────────────────────
+  const statutCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const c of consultations) {
+      const s = c.statutConsultation || 'pre_consultation';
+      counts[s] = (counts[s] || 0) + 1;
+    }
+    return counts;
+  }, [consultations]);
+
+  // ── Filtrage intelligent ───────────────────────────────────────────
+  const filteredConsultations = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return consultations.filter(c => {
+      // Période
+      if (!matchPeriod(c.date_consultation, period, customStart, customEnd)) return false;
+
+      // Statut
+      if (statut !== 'all' && (c.statutConsultation || 'pre_consultation') !== statut) return false;
+
+      // Recherche full-text
+      if (q) {
+        const haystack = [
+          c.motif, c.examen_clinique, c.diagnostic_principal, c.synthese,
+          c.prescription, c.observations, c.commentaire_assistante, c.allergies,
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [consultations, search, period, customStart, customEnd, statut]);
+
+  const hasActiveFilters = !!search || period !== 'all' || statut !== 'all';
+  const resetFilters = () => {
+    setSearch(''); setPeriod('all'); setCustomStart(''); setCustomEnd(''); setStatut('all');
+  };
 
   if (loading) {
     return <div className="p-4 text-center text-slate-500">Chargement des consultations...</div>;
@@ -128,38 +164,36 @@ export default function PatientConsultations({ patientId }: PatientConsultations
 
   return (
     <div className="space-y-6">
-      {/* Filters */}
-      <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 flex flex-wrap gap-4 items-end">
-        <div>
-          <label htmlFor="dateDebut" className="block text-sm font-medium text-slate-700 mb-1">Date de début</label>
-          <input
-            type="date"
-            id="dateDebut"
-            value={dateDebut}
-            onChange={(e) => setDateDebut(e.target.value)}
-            className="block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2"
-          />
-        </div>
-        <div>
-          <label htmlFor="dateFin" className="block text-sm font-medium text-slate-700 mb-1">Date de fin</label>
-          <input
-            type="date"
-            id="dateFin"
-            value={dateFin}
-            onChange={(e) => setDateFin(e.target.value)}
-            className="block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2"
-          />
-        </div>
-        <div className="flex-grow"></div>
-        {(dateDebut || dateFin) && (
-          <button
-            onClick={() => { setDateDebut(''); setDateFin(''); }}
-            className="text-sm text-indigo-600 hover:text-indigo-900 font-medium"
-          >
-            Effacer les filtres
-          </button>
-        )}
-      </div>
+      <SmartFilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Rechercher motif, diagnostic, synthèse…"
+        period={period}
+        onPeriodChange={setPeriod}
+        customStart={customStart}
+        customEnd={customEnd}
+        onCustomStartChange={setCustomStart}
+        onCustomEndChange={setCustomEnd}
+        chipGroups={[
+          {
+            key:     'statut',
+            label:   'Statut',
+            active:  statut,
+            onChange: setStatut,
+            options: [
+              { id: 'pre_consultation', label: 'Pré-consultation', count: statutCounts['pre_consultation'], color: 'amber' },
+              { id: 'en_attente',       label: 'En attente',       count: statutCounts['en_attente'],       color: 'amber' },
+              { id: 'en_cours',         label: 'En cours',         count: statutCounts['en_cours'],         color: 'blue'  },
+              { id: 'terminee',         label: 'Terminée',         count: statutCounts['terminee'],         color: 'green' },
+            ].filter(o => o.count && o.count > 0),
+          },
+        ]}
+        totalCount={consultations.length}
+        filteredCount={filteredConsultations.length}
+        itemLabel="consultation"
+        hasActiveFilters={hasActiveFilters}
+        onReset={resetFilters}
+      />
 
       {filteredConsultations.length === 0 ? (
         <div className="text-center py-12 text-slate-500">

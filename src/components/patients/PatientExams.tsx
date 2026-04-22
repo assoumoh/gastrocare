@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     collection, query, where, onSnapshot, orderBy,
     deleteDoc, doc, writeBatch
@@ -15,6 +15,8 @@ import ExamRequestModal from '../salle-attente/ExamRequestModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSettings } from '../../hooks/useSettings';
 import { buildDocuments, printDocuments } from '../../utils/examPrint';
+import SmartFilterBar from '../shared/SmartFilterBar';
+import { matchPeriod, type PeriodId } from '../../utils/filterHelpers';
 
 interface PatientExamsProps {
   patientId: string;
@@ -44,8 +46,14 @@ export default function PatientExams({ patientId, patientName = 'Patient' }: Pat
     const [isRequestOpen, setIsRequestOpen] = useState(false);
     const [selectedExam, setSelectedExam]   = useState<any>(null);
     const [expandedDemandes, setExpandedDemandes] = useState<Set<string>>(new Set());
-    const [dateDebut, setDateDebut]         = useState('');
-    const [dateFin, setDateFin]             = useState('');
+
+    // Smart filters
+    const [search, setSearch]           = useState('');
+    const [period, setPeriod]           = useState<PeriodId>('all');
+    const [customStart, setCustomStart] = useState('');
+    const [customEnd, setCustomEnd]     = useState('');
+    const [typeFilter, setTypeFilter]   = useState<string>('all');
+    const [statutFilter, setStatutFilter] = useState<string>('all');
 
     const { appUser }  = useAuth();
     const { settings } = useSettings();
@@ -116,12 +124,41 @@ export default function PatientExams({ patientId, patientName = 'Patient' }: Pat
         printDocuments(docs, patientName, settings);
     };
 
-    // ── Filtrage + Groupement ─────────────────────────────────────────────
-    const filtered = exams.filter(e => {
-        if (dateDebut && (e.date_examen || e.date_demande) < dateDebut) return false;
-        if (dateFin   && (e.date_examen || e.date_demande) > dateFin)   return false;
-        return true;
-    });
+    // ── Comptages pour les chips ──────────────────────────────────────────
+    const typeCounts = useMemo(() => {
+        const c: Record<string, number> = {};
+        for (const e of exams) { const k = e.type_examen || 'Autre'; c[k] = (c[k] || 0) + 1; }
+        return c;
+    }, [exams]);
+    const statutCounts = useMemo(() => {
+        const c: Record<string, number> = {};
+        for (const e of exams) { const k = e.statut || e.statutExamen || 'demandé'; c[k] = (c[k] || 0) + 1; }
+        return c;
+    }, [exams]);
+
+    // ── Filtrage intelligent ──────────────────────────────────────────────
+    const filtered = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        return exams.filter(e => {
+            const dateRef = e.date_examen || e.date_demande;
+            if (!matchPeriod(dateRef, period, customStart, customEnd)) return false;
+            if (typeFilter   !== 'all' && (e.type_examen || 'Autre') !== typeFilter) return false;
+            if (statutFilter !== 'all' && (e.statut || e.statutExamen || 'demandé') !== statutFilter) return false;
+            if (q) {
+                const haystack = [
+                    e.nom_examen, e.type_examen, e.commentaire, e.resultat_examen,
+                ].filter(Boolean).join(' ').toLowerCase();
+                if (!haystack.includes(q)) return false;
+            }
+            return true;
+        });
+    }, [exams, search, period, customStart, customEnd, typeFilter, statutFilter]);
+
+    const hasActiveFilters = !!search || period !== 'all' || typeFilter !== 'all' || statutFilter !== 'all';
+    const resetFilters = () => {
+        setSearch(''); setPeriod('all'); setCustomStart(''); setCustomEnd('');
+        setTypeFilter('all'); setStatutFilter('all');
+    };
 
     // Exams avec demande_id → groupés, sans → affichage individuel
     const withDemande    = filtered.filter(e => e.demande_id);
@@ -145,22 +182,44 @@ export default function PatientExams({ patientId, patientName = 'Patient' }: Pat
 
     return (
         <div className="space-y-4">
-            {/* Filtres date */}
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 flex flex-wrap gap-4 items-end">
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Date de début</label>
-                    <input type="date" value={dateDebut} onChange={e => setDateDebut(e.target.value)} className="block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Date de fin</label>
-                    <input type="date" value={dateFin} onChange={e => setDateFin(e.target.value)} className="block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
-                </div>
-                {(dateDebut || dateFin) && (
-                    <button onClick={() => { setDateDebut(''); setDateFin(''); }} className="px-3 py-2 border border-slate-300 rounded-md text-sm font-medium text-slate-700 bg-white hover:bg-slate-50">
-                        Effacer les filtres
-                    </button>
-                )}
-            </div>
+            <SmartFilterBar
+                search={search}
+                onSearchChange={setSearch}
+                searchPlaceholder="Rechercher nom d'examen, résultat, commentaire…"
+                period={period}
+                onPeriodChange={setPeriod}
+                customStart={customStart}
+                customEnd={customEnd}
+                onCustomStartChange={setCustomStart}
+                onCustomEndChange={setCustomEnd}
+                chipGroups={[
+                    {
+                        key: 'type', label: 'Type', active: typeFilter, onChange: setTypeFilter,
+                        options: [
+                            { id: 'Biologie',    label: 'Biologie',    count: typeCounts['Biologie'],    color: 'indigo' },
+                            { id: 'Imagerie',    label: 'Imagerie',    count: typeCounts['Imagerie'],    color: 'blue'   },
+                            { id: 'Endoscopie',  label: 'Endoscopie',  count: typeCounts['Endoscopie'],  color: 'purple' },
+                            { id: 'Fonctionnel', label: 'Fonctionnel', count: typeCounts['Fonctionnel'], color: 'amber'  },
+                            { id: 'Anapath',     label: 'Anapath',     count: typeCounts['Anapath'],     color: 'rose'   },
+                            { id: 'Autre',       label: 'Autre',       count: typeCounts['Autre'],       color: 'slate'  },
+                        ].filter(o => o.count && o.count > 0),
+                    },
+                    {
+                        key: 'statut', label: 'Statut', active: statutFilter, onChange: setStatutFilter,
+                        options: [
+                            { id: 'demandé',             label: 'Demandé',    count: statutCounts['demandé'],             color: 'amber' },
+                            { id: 'en_attente_resultat', label: 'En attente', count: statutCounts['en_attente_resultat'], color: 'blue'  },
+                            { id: 'apporte',             label: 'Apporté',    count: statutCounts['apporte'],             color: 'purple' },
+                            { id: 'analyse',             label: 'Analysé',    count: statutCounts['analyse'],             color: 'green' },
+                        ].filter(o => o.count && o.count > 0),
+                    },
+                ]}
+                totalCount={exams.length}
+                filteredCount={filtered.length}
+                itemLabel="examen"
+                hasActiveFilters={hasActiveFilters}
+                onReset={resetFilters}
+            />
 
             {/* Boutons d'action */}
             <div className="flex justify-between items-center flex-wrap gap-2">
