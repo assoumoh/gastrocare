@@ -147,10 +147,31 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
         onComplete();
     };
 
-    // ======= VUE APRÈS SAUVEGARDE — style aligné avec ordonnance =======
+    // ======= VUE APRÈS SAUVEGARDE — Évo 3 : multi-documents =======
     if (saved) {
+        // Groupement : biologie → 1 doc unique, autres types → 1 doc par examen
+        const biologieExams = savedExams.filter(e => e.type_examen === 'Biologie');
+        const otherExams = savedExams.filter(e => e.type_examen !== 'Biologie');
+        const documents: { key: string; exams: ExamEntry[]; note: string }[] = [];
+        if (biologieExams.length > 0) {
+            const mergedNote = biologieExams.map(e => e.commentaire?.trim()).filter(Boolean).join(' · ');
+            documents.push({ key: 'biologie', exams: biologieExams, note: mergedNote });
+        }
+        for (let i = 0; i < otherExams.length; i++) {
+            const e = otherExams[i];
+            documents.push({ key: `other-${i}`, exams: [e], note: (e.commentaire || '').trim() });
+        }
+
         return (
             <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto print:bg-white print:p-0">
+                {/* Styles d'impression : saut de page entre documents */}
+                <style>{`
+                    @media print {
+                        .exam-doc-page { break-after: page; page-break-after: always; }
+                        .exam-doc-page:last-child { break-after: auto; page-break-after: auto; }
+                    }
+                `}</style>
+
                 <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-8 relative print:shadow-none print:my-0 print:max-w-none print:rounded-none flex flex-col max-h-[90vh] print:max-h-none print:h-auto">
 
                     {/* Header écran — masqué à l'impression */}
@@ -158,7 +179,7 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                         <div className="flex items-center gap-2">
                             <CheckCircle className="w-5 h-5 text-green-600" />
                             <h2 className="text-lg font-semibold text-slate-900">
-                                Examens enregistrés ({savedExams.length})
+                                {documents.length} document{documents.length > 1 ? 's' : ''} à imprimer — {savedExams.length} examen{savedExams.length > 1 ? 's' : ''}
                             </h2>
                         </div>
                         <div className="flex space-x-2">
@@ -175,59 +196,72 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                         </div>
                     </div>
 
-                    {/* ZONE IMPRIMABLE — même style que PrescriptionPrintView */}
-                    <div id="printable-area" className="p-12 print:p-8 bg-white text-black overflow-y-auto grow">
+                    {/* ZONE IMPRIMABLE */}
+                    <div id="printable-area" className="bg-white text-black overflow-y-auto grow">
 
-                        {/* En-tête médecin — identique à l'ordonnance */}
-                        <div className="text-center mb-12 border-b-2 border-slate-800 pb-6">
-                            <h1 className="text-2xl font-bold uppercase tracking-wider text-slate-900">Docteur Elidrissi Laila</h1>
-                            <p className="text-sm text-slate-600 mt-1">Spécialiste en Gastro-entérologie et Hépatologie</p>
-                            <p className="text-sm text-slate-600">339, immeuble FENNI, bd Mohamed V</p>
-                        </div>
+                        {documents.map((docu, docIdx) => (
+                            <div
+                                key={docu.key}
+                                className="exam-doc-page p-12 print:p-8 border-b-8 border-dashed border-slate-200 print:border-none last:border-b-0"
+                            >
+                                {/* En-tête médecin */}
+                                <div className="text-center mb-12 border-b-2 border-slate-800 pb-6">
+                                    <h1 className="text-2xl font-bold uppercase tracking-wider text-slate-900">Docteur Elidrissi Laila</h1>
+                                    <p className="text-sm text-slate-600 mt-1">Spécialiste en Gastro-entérologie et Hépatologie</p>
+                                    <p className="text-sm text-slate-600">339, immeuble FENNI, bd Mohamed V</p>
+                                </div>
 
-                        {/* Titre du document */}
-                        <div className="text-center mb-10">
-                            <h2 className="text-xl font-bold uppercase tracking-widest text-slate-900 border-2 border-slate-900 inline-block px-6 py-2">
-                                Demande d'Examens Complémentaires
-                            </h2>
-                        </div>
-
-                        {/* Infos patient + date */}
-                        <div className="flex justify-between items-start mb-12 text-base">
-                            <div className="space-y-1">
-                                <p><span className="font-semibold">Patient :</span> {patientName}</p>
-                            </div>
-                            <div className="text-right">
-                                <p>Le {new Date().toLocaleDateString('fr-FR')}</p>
-                            </div>
-                        </div>
-
-                        {/* Tableau des examens */}
-                        <div className="space-y-6 mb-16 min-h-[200px]">
-                            {savedExams.map((exam, idx) => (
-                                <div key={idx} className="pl-4 border-l-4 border-slate-200">
-                                    <p className="font-bold text-lg text-slate-900">
-                                        • {exam.nom_examen}
-                                    </p>
-                                    <p className="text-base text-slate-800 mt-1 ml-4">
-                                        <span className="font-semibold">Type :</span> {exam.type_examen}
-                                    </p>
-                                    {exam.commentaire && (
-                                        <p className="text-sm text-slate-600 italic ml-4 mt-1">
-                                            Note : {exam.commentaire}
+                                {/* Titre du document */}
+                                <div className="text-center mb-10">
+                                    <h2 className="text-xl font-bold uppercase tracking-widest text-slate-900 border-2 border-slate-900 inline-block px-6 py-2">
+                                        Demande d'Examens Complémentaires
+                                    </h2>
+                                    {/* Indicateur de pagination — visible à l'écran uniquement */}
+                                    {documents.length > 1 && (
+                                        <p className="text-xs text-slate-400 mt-3 print:hidden">
+                                            Document {docIdx + 1} / {documents.length}
                                         </p>
                                     )}
                                 </div>
-                            ))}
-                        </div>
 
-                        {/* Signature */}
-                        <div className="flex justify-end mt-20">
-                            <div className="text-center">
-                                <p className="font-semibold mb-16">Signature / Cachet</p>
-                                <div className="w-48 border-b border-slate-300"></div>
+                                {/* Infos patient + date */}
+                                <div className="flex justify-between items-start mb-10 text-base">
+                                    <div className="space-y-1">
+                                        <p><span className="font-semibold">Patient :</span> {patientName}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p>Le {new Date().toLocaleDateString('fr-FR')}</p>
+                                    </div>
+                                </div>
+
+                                {/* Note — EN HAUT, au-dessus des examens (Évo 3) */}
+                                {docu.note && (
+                                    <div className="mb-8 p-4 border-l-4 border-slate-400 bg-slate-50 print:bg-transparent">
+                                        <p className="text-sm font-semibold text-slate-700 mb-1">Note :</p>
+                                        <p className="text-base text-slate-800 whitespace-pre-wrap">{docu.note}</p>
+                                    </div>
+                                )}
+
+                                {/* Liste des examens — PAS de type affiché (Évo 3) */}
+                                <div className="space-y-4 mb-16 min-h-[160px]">
+                                    {docu.exams.map((exam, idx) => (
+                                        <div key={idx} className="pl-4 border-l-4 border-slate-200">
+                                            <p className="font-bold text-lg text-slate-900">
+                                                • {exam.nom_examen}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Signature */}
+                                <div className="flex justify-end mt-20">
+                                    <div className="text-center">
+                                        <p className="font-semibold mb-16">Signature / Cachet</p>
+                                        <div className="w-48 border-b border-slate-300"></div>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
+                        ))}
                     </div>
 
                     {/* Bouton continuer — masqué à l'impression */}
@@ -237,7 +271,7 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
                         >
                             <Printer className="w-4 h-4" />
-                            Imprimer
+                            Imprimer ({documents.length} document{documents.length > 1 ? 's' : ''})
                         </button>
                         <button
                             onClick={onComplete}
