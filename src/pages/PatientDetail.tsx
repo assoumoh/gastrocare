@@ -236,7 +236,7 @@ export default function PatientDetail() {
         )}
 
         {activeTab === 'consultations' && <PatientConsultations patientId={patient.id} />}
-        {activeTab === 'exams' && <PatientExams patientId={patient.id} />}
+        {activeTab === 'exams' && <PatientExams patientId={patient.id} patientName={`${patient.nom || ''} ${patient.prenom || ''}`.trim()} />}
         {activeTab === 'prescriptions' && <PatientPrescriptions patientId={patient.id} />}
         {activeTab === 'documents' && <PatientDocuments patientId={patient.id} />}
         {activeTab === 'finance' && <PatientFinance patientId={patient.id} />}

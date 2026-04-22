@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { Plus, Edit, Trash2, FileText, DollarSign, Paperclip, Calendar, Clock, CheckCircle } from 'lucide-react';
+import { Plus, Edit, Trash2, FileText, DollarSign, Paperclip, Calendar, Clock, CheckCircle, FlaskConical } from 'lucide-react';
 import ExamForm from '../exams/ExamForm';
 import DocumentForm from '../documents/DocumentForm';
+import ExamRequestModal from '../salle-attente/ExamRequestModal';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface PatientExamsProps {
   patientId: string;
+  patientName?: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -24,13 +26,14 @@ const STATUS_LABELS: Record<string, string> = {
   analyse: 'Analysé',
 };
 
-export default function PatientExams({ patientId }: PatientExamsProps) {
+export default function PatientExams({ patientId, patientName = 'Patient' }: PatientExamsProps) {
   const [exams, setExams] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDocFormOpen, setIsDocFormOpen] = useState(false);
+  const [isRequestOpen, setIsRequestOpen] = useState(false);
   const [selectedExam, setSelectedExam] = useState<any>(null);
   const { appUser } = useAuth();
 
@@ -124,12 +127,21 @@ export default function PatientExams({ patientId }: PatientExamsProps) {
         )}
       </div>
 
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-2">
         <h3 className="text-lg font-medium text-slate-900">Examens du patient</h3>
         {appUser?.role !== 'assistante' && (
-          <button onClick={() => { setSelectedExam(null); setIsFormOpen(true); }} className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700">
-            <Plus className="-ml-0.5 mr-2 h-4 w-4" />Ajouter un examen
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setIsRequestOpen(true)}
+              className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700"
+              title="Créer une ou plusieurs demandes d'examens et générer les PDFs"
+            >
+              <FlaskConical className="-ml-0.5 mr-2 h-4 w-4" />Nouvelle demande d'examens
+            </button>
+            <button onClick={() => { setSelectedExam(null); setIsFormOpen(true); }} className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700">
+              <Plus className="-ml-0.5 mr-2 h-4 w-4" />Ajouter un examen
+            </button>
+          </div>
         )}
       </div>
 
@@ -247,6 +259,14 @@ export default function PatientExams({ patientId }: PatientExamsProps) {
 
       {isFormOpen && <ExamForm exam={selectedExam} patientId={patientId} onClose={() => setIsFormOpen(false)} />}
       {isDocFormOpen && <DocumentForm patientId={patientId} examenId={selectedExam?.id} onClose={() => setIsDocFormOpen(false)} />}
+      {isRequestOpen && (
+        <ExamRequestModal
+          patientId={patientId}
+          patientName={patientName}
+          onComplete={() => setIsRequestOpen(false)}
+          onClose={() => setIsRequestOpen(false)}
+        />
+      )}
     </div>
   );
 }
