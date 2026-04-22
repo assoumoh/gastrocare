@@ -62,6 +62,137 @@ const EXAM_TYPES: Record<string, string[]> = {
     Autre: ['Autre'],
 };
 
+/** Regroupe les examens : biologie → 1 doc, autres types → 1 doc par examen */
+function buildDocuments(exams: ExamEntry[]) {
+    const biologieExams = exams.filter(e => e.type_examen === 'Biologie');
+    const otherExams    = exams.filter(e => e.type_examen !== 'Biologie');
+    const docs: { key: string; exams: ExamEntry[]; note: string }[] = [];
+
+    if (biologieExams.length > 0) {
+        const mergedNote = biologieExams.map(e => e.commentaire?.trim()).filter(Boolean).join(' · ');
+        docs.push({ key: 'biologie', exams: biologieExams, note: mergedNote });
+    }
+    otherExams.forEach((e, i) => {
+        docs.push({ key: `other-${i}`, exams: [e], note: (e.commentaire || '').trim() });
+    });
+    return docs;
+}
+
+/** Ouvre une nouvelle fenêtre vierge et lance l'impression — aucune dépendance
+ *  vis-à-vis du DOM React, des modals, de Tailwind ou des media queries. */
+function printDocuments(
+    documents: { key: string; exams: ExamEntry[]; note: string }[],
+    patientName: string,
+) {
+    const pw = window.open('', '_blank');
+    if (!pw) {
+        alert("Veuillez autoriser les popups pour ce site afin d'imprimer.");
+        return;
+    }
+
+    const today = new Date().toLocaleDateString('fr-FR');
+
+    const escHtml = (s: string) =>
+        s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const pages = documents.map(docu => `
+        <div class="page">
+            <div class="header">
+                <h1>Docteur Elidrissi Laila</h1>
+                <p class="sub">Spécialiste en Gastro-entérologie et Hépatologie</p>
+                <p class="sub">339, immeuble FENNI, bd Mohamed V</p>
+            </div>
+
+            <div class="title-wrap">
+                <span class="title-box">Demande d&rsquo;Examens Complémentaires</span>
+            </div>
+
+            <div class="patient-row">
+                <span><strong>Patient&nbsp;:</strong>&nbsp;${escHtml(patientName)}</span>
+                <span>Le&nbsp;${today}</span>
+            </div>
+
+            ${docu.note ? `
+            <div class="note">
+                <strong>Note&nbsp;:</strong>&nbsp;${escHtml(docu.note)}
+            </div>` : ''}
+
+            <div class="exams">
+                ${docu.exams.map(e => `
+                <div class="exam-item">&bull;&nbsp;${escHtml(e.nom_examen)}</div>
+                `).join('')}
+            </div>
+
+            <div class="signature">
+                <span>Signature&nbsp;/&nbsp;Cachet</span>
+                <div class="sig-line"></div>
+            </div>
+        </div>
+    `).join('\n');
+
+    pw.document.write(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Demandes d'examens — ${escHtml(patientName)}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; background: #fff; color: #111; }
+
+  @page { size: A4; margin: 1.5cm; }
+
+  /* Chaque .page = une feuille A4 */
+  .page {
+    width: 100%;
+    min-height: 24cm;          /* occupe toute la feuille */
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 0.5cm;
+  }
+  /* Saut de page ENTRE pages (pas de trailing blank page) */
+  .page + .page { page-break-before: always; }
+
+  /* En-tête médecin */
+  .header { text-align: center; border-bottom: 2px solid #111; padding-bottom: 1rem; margin-bottom: 2rem; }
+  .header h1 { font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; }
+  .header .sub { font-size: 12px; color: #555; margin-top: 3px; }
+
+  /* Titre encadré */
+  .title-wrap { text-align: center; margin-bottom: 2rem; }
+  .title-box {
+    font-size: 13px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 2px; border: 2px solid #111;
+    display: inline-block; padding: 7px 20px;
+  }
+
+  /* Ligne patient / date */
+  .patient-row { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 2rem; }
+
+  /* Note */
+  .note { background: #f5f5f5; border-left: 4px solid #888; padding: 10px 14px; margin-bottom: 1.5rem; font-size: 13px; }
+
+  /* Liste examens */
+  .exams { flex: 1; margin-bottom: 1rem; }
+  .exam-item { font-size: 15px; font-weight: 700; padding: 7px 0 7px 14px; border-left: 4px solid #ccc; margin-bottom: 8px; }
+
+  /* Signature en bas */
+  .signature { margin-top: auto; text-align: right; padding-top: 2rem; }
+  .signature span { font-size: 13px; font-weight: 600; display: block; margin-bottom: 2.5rem; }
+  .sig-line { width: 160px; border-bottom: 1px solid #999; margin-left: auto; }
+</style>
+</head>
+<body>
+${pages}
+</body>
+</html>`);
+
+    pw.document.close();
+    // Laisser le temps au navigateur de rendre avant d'ouvrir la boîte d'impression
+    setTimeout(() => { pw.focus(); pw.print(); }, 400);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
     patientId,
     patientName,
@@ -69,28 +200,24 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
     onComplete,
     onClose,
 }) => {
-    // *** FIX: appUser au lieu de user ***
     const { appUser } = useAuth();
     const [exams, setExams] = useState<ExamEntry[]>([
         { type_examen: 'Biologie', nom_examen: EXAM_TYPES['Biologie'][0], commentaire: '' },
     ]);
     const [savedExams, setSavedExams] = useState<ExamEntry[]>([]);
-    const [saving, setSaving] = useState(false);
-    const [saved, setSaved] = useState(false);
+    const [saving, setSaving]         = useState(false);
+    const [saved, setSaved]           = useState(false);
 
     const handleAddExam = () => {
-        setExams((prev) => [
-            ...prev,
-            { type_examen: 'Biologie', nom_examen: EXAM_TYPES['Biologie'][0], commentaire: '' },
-        ]);
+        setExams(prev => [...prev, { type_examen: 'Biologie', nom_examen: EXAM_TYPES['Biologie'][0], commentaire: '' }]);
     };
 
     const handleRemoveExam = (index: number) => {
-        setExams((prev) => prev.filter((_, i) => i !== index));
+        setExams(prev => prev.filter((_, i) => i !== index));
     };
 
     const handleChangeExam = (index: number, field: keyof ExamEntry, value: string) => {
-        setExams((prev) => {
+        setExams(prev => {
             const updated = [...prev];
             updated[index] = { ...updated[index], [field]: value };
             if (field === 'type_examen') {
@@ -102,30 +229,26 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
     };
 
     const handleSave = async () => {
-        if (exams.length === 0) {
-            onComplete();
-            return;
-        }
+        if (exams.length === 0) { onComplete(); return; }
 
         setSaving(true);
         try {
-            const now = new Date().toISOString();
+            const now   = new Date().toISOString();
             const today = now.split('T')[0];
 
             for (const exam of exams) {
                 await addDoc(collection(db, 'exams'), {
-                    patient_id: patientId,
+                    patient_id:      patientId,
                     consultation_id: consultationId || null,
-                    type_examen: exam.type_examen,
-                    nom_examen: exam.nom_examen,
-                    commentaire: exam.commentaire || '',
-                    statut: 'demandé',
-                    date_demande: today,
-                    date_examen: today,
-                    // *** FIX: appUser au lieu de user ***
-                    created_by: appUser?.uid || '',
-                    created_at: now,
-                    updated_at: now,
+                    type_examen:     exam.type_examen,
+                    nom_examen:      exam.nom_examen,
+                    commentaire:     exam.commentaire || '',
+                    statut:          'demandé',
+                    date_demande:    today,
+                    date_examen:     today,
+                    created_by:      appUser?.uid || '',
+                    created_at:      now,
+                    updated_at:      now,
                 });
             }
 
@@ -139,220 +262,65 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
         }
     };
 
-    const handlePrint = () => {
-        window.print();
-    };
-
-    const handleSkip = () => {
-        onComplete();
-    };
-
-    // ======= VUE APRÈS SAUVEGARDE — Évo 3 : multi-documents =======
+    // ======= VUE APRÈS SAUVEGARDE =======
     if (saved) {
-        // Groupement : biologie → 1 doc unique, autres types → 1 doc par examen
-        const biologieExams = savedExams.filter(e => e.type_examen === 'Biologie');
-        const otherExams = savedExams.filter(e => e.type_examen !== 'Biologie');
-        const documents: { key: string; exams: ExamEntry[]; note: string }[] = [];
-        if (biologieExams.length > 0) {
-            const mergedNote = biologieExams.map(e => e.commentaire?.trim()).filter(Boolean).join(' · ');
-            documents.push({ key: 'biologie', exams: biologieExams, note: mergedNote });
-        }
-        for (let i = 0; i < otherExams.length; i++) {
-            const e = otherExams[i];
-            documents.push({ key: `other-${i}`, exams: [e], note: (e.commentaire || '').trim() });
-        }
+        const documents = buildDocuments(savedExams);
 
         return (
-            <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto print:bg-white print:p-0">
-                {/* Styles d'impression : une page par demande d'examen */}
-                <style>{`
-                    @media print {
-                        @page { margin: 1.5cm; }
+            <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl">
 
-                        html, body {
-                            margin: 0 !important;
-                            padding: 0 !important;
-                            height: auto !important;
-                            min-height: 0 !important;
-                            max-height: none !important;
-                            overflow: visible !important;
-                            background: #fff !important;
-                        }
-
-                        /* 1) Masquer tout le reste de l'app */
-                        body * {
-                            visibility: hidden !important;
-                            overflow: visible !important;
-                            max-height: none !important;
-                            height: auto !important;
-                        }
-
-                        /* 2) Neutraliser toutes les containers fixes/absolus */
-                        .fixed, .absolute, .sticky {
-                            position: static !important;
-                            inset: auto !important;
-                        }
-
-                        /* 3) Aplatir le shell du modal : pas de flex, pas de marges, pas de
-                              largeur max, pas d'ombre → le contenu imprimable commence en haut. */
-                        .fixed, .fixed > div, .fixed > div > div {
-                            display: block !important;
-                            margin: 0 !important;
-                            padding: 0 !important;
-                            max-width: none !important;
-                            width: auto !important;
-                            box-shadow: none !important;
-                            border-radius: 0 !important;
-                            border: none !important;
-                            background: transparent !important;
-                        }
-
-                        /* 3b) Ré-appliquer display:none sur les éléments print:hidden que la
-                               règle ci-dessus aurait écrasés (header + footer du modal).
-                               Sans ça, ils occupent de l'espace en haut et décalent le 1er doc. */
-                        .print\\:hidden { display: none !important; }
-
-                        /* 4) Révéler uniquement la zone imprimable et ses descendants */
-                        #printable-area, #printable-area * {
-                            visibility: visible !important;
-                        }
-                        #printable-area {
-                            display: block !important;
-                            background: #fff !important;
-                            margin: 0 !important;
-                            padding: 0 !important;
-                        }
-
-                        /* 5) Saut de page forcé entre chaque demande d'examen */
-                        .exam-doc-page {
-                            break-after: page !important;
-                            page-break-after: always !important;
-                            border: none !important;
-                            padding: 0 !important;
-                            margin: 0 !important;
-                        }
-                        .exam-doc-page:last-child {
-                            break-after: auto !important;
-                            page-break-after: auto !important;
-                        }
-
-                        /* 6) Réduire l'espacement écran gigantesque qui faisait déborder sur une
-                              2e page et tassait la mise en page. */
-                        .exam-doc-page .mb-12 { margin-bottom: 1.5rem !important; }
-                        .exam-doc-page .mb-10 { margin-bottom: 1.25rem !important; }
-                        .exam-doc-page .mb-8  { margin-bottom: 1rem !important; }
-                        .exam-doc-page .mb-16 { margin-bottom: 1.5rem !important; }
-                        .exam-doc-page .mt-20 { margin-top: 2.5rem !important; }
-                        .exam-doc-page .mt-16 { margin-top: 2rem !important; }
-                        .exam-doc-page .pb-6  { padding-bottom: 1rem !important; }
-                        .exam-doc-page [class*="min-h-"] { min-height: 0 !important; }
-                    }
-                `}</style>
-
-                <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-8 relative print:shadow-none print:my-0 print:max-w-none print:rounded-none flex flex-col max-h-[90vh] print:max-h-none print:h-auto">
-
-                    {/* Header écran — masqué à l'impression */}
-                    <div className="flex items-center justify-between p-4 border-b border-slate-200 print:hidden shrink-0">
-                        <div className="flex items-center gap-2">
-                            <CheckCircle className="w-5 h-5 text-green-600" />
-                            <h2 className="text-lg font-semibold text-slate-900">
-                                {documents.length} document{documents.length > 1 ? 's' : ''} à imprimer — {savedExams.length} examen{savedExams.length > 1 ? 's' : ''}
-                            </h2>
+                    {/* Header */}
+                    <div className="flex items-center justify-between p-5 border-b border-slate-200">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-green-100 rounded-lg">
+                                <CheckCircle className="w-5 h-5 text-green-600" />
+                            </div>
+                            <div>
+                                <h2 className="text-base font-semibold text-slate-900">
+                                    {savedExams.length} examen{savedExams.length > 1 ? 's' : ''} enregistré{savedExams.length > 1 ? 's' : ''}
+                                </h2>
+                                <p className="text-xs text-slate-500">
+                                    {documents.length} document{documents.length > 1 ? 's' : ''} prêt{documents.length > 1 ? 's' : ''} à imprimer
+                                </p>
+                            </div>
                         </div>
-                        <div className="flex space-x-2">
-                            <button
-                                onClick={handlePrint}
-                                className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
-                            >
-                                <Printer className="mr-2 h-4 w-4" />
-                                Imprimer
-                            </button>
-                            <button onClick={() => onComplete()} className="p-2 text-slate-400 hover:text-slate-500 rounded-full hover:bg-slate-100">
-                                <X className="h-5 w-5" />
-                            </button>
-                        </div>
+                        <button onClick={onComplete} className="p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+                            <X className="h-5 w-5" />
+                        </button>
                     </div>
 
-                    {/* ZONE IMPRIMABLE */}
-                    <div id="printable-area" className="bg-white text-black overflow-y-auto grow">
-
-                        {documents.map((docu, docIdx) => (
-                            <div
-                                key={docu.key}
-                                className="exam-doc-page p-12 print:p-8 border-b-8 border-dashed border-slate-200 print:border-none last:border-b-0"
-                            >
-                                {/* En-tête médecin */}
-                                <div className="text-center mb-12 border-b-2 border-slate-800 pb-6">
-                                    <h1 className="text-2xl font-bold uppercase tracking-wider text-slate-900">Docteur Elidrissi Laila</h1>
-                                    <p className="text-sm text-slate-600 mt-1">Spécialiste en Gastro-entérologie et Hépatologie</p>
-                                    <p className="text-sm text-slate-600">339, immeuble FENNI, bd Mohamed V</p>
-                                </div>
-
-                                {/* Titre du document */}
-                                <div className="text-center mb-10">
-                                    <h2 className="text-xl font-bold uppercase tracking-widest text-slate-900 border-2 border-slate-900 inline-block px-6 py-2">
-                                        Demande d'Examens Complémentaires
-                                    </h2>
-                                    {/* Indicateur de pagination — visible à l'écran uniquement */}
-                                    {documents.length > 1 && (
-                                        <p className="text-xs text-slate-400 mt-3 print:hidden">
-                                            Document {docIdx + 1} / {documents.length}
-                                        </p>
+                    {/* Récapitulatif des documents */}
+                    <div className="p-5 space-y-3 max-h-[50vh] overflow-y-auto">
+                        {documents.map((docu, idx) => (
+                            <div key={docu.key} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                <span className="flex-shrink-0 w-6 h-6 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center text-xs font-bold">
+                                    {idx + 1}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-slate-800">
+                                        {docu.exams.length === 1 ? docu.exams[0].nom_examen : `Biologie (${docu.exams.length} examens)`}
+                                    </p>
+                                    {docu.note && (
+                                        <p className="text-xs text-slate-500 mt-0.5 truncate">Note : {docu.note}</p>
                                     )}
-                                </div>
-
-                                {/* Infos patient + date */}
-                                <div className="flex justify-between items-start mb-10 text-base">
-                                    <div className="space-y-1">
-                                        <p><span className="font-semibold">Patient :</span> {patientName}</p>
-                                    </div>
-                                    <div className="text-right">
-                                        <p>Le {new Date().toLocaleDateString('fr-FR')}</p>
-                                    </div>
-                                </div>
-
-                                {/* Note — EN HAUT, au-dessus des examens (Évo 3) */}
-                                {docu.note && (
-                                    <div className="mb-8 p-4 border-l-4 border-slate-400 bg-slate-50 print:bg-transparent">
-                                        <p className="text-sm font-semibold text-slate-700 mb-1">Note :</p>
-                                        <p className="text-base text-slate-800 whitespace-pre-wrap">{docu.note}</p>
-                                    </div>
-                                )}
-
-                                {/* Liste des examens — PAS de type affiché (Évo 3) */}
-                                <div className="space-y-4 mb-16 min-h-[160px]">
-                                    {docu.exams.map((exam, idx) => (
-                                        <div key={idx} className="pl-4 border-l-4 border-slate-200">
-                                            <p className="font-bold text-lg text-slate-900">
-                                                • {exam.nom_examen}
-                                            </p>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                {/* Signature */}
-                                <div className="flex justify-end mt-20">
-                                    <div className="text-center">
-                                        <p className="font-semibold mb-16">Signature / Cachet</p>
-                                        <div className="w-48 border-b border-slate-300"></div>
-                                    </div>
                                 </div>
                             </div>
                         ))}
                     </div>
 
-                    {/* Bouton continuer — masqué à l'impression */}
-                    <div className="flex justify-between items-center p-4 border-t border-slate-200 print:hidden shrink-0">
+                    {/* Footer */}
+                    <div className="flex justify-between items-center p-5 border-t border-slate-200">
                         <button
-                            onClick={handlePrint}
-                            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
+                            onClick={() => printDocuments(documents, patientName)}
+                            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors"
                         >
                             <Printer className="w-4 h-4" />
-                            Imprimer ({documents.length} document{documents.length > 1 ? 's' : ''})
+                            Imprimer {documents.length} document{documents.length > 1 ? 's' : ''}
                         </button>
                         <button
                             onClick={onComplete}
-                            className="flex items-center gap-2 px-6 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors"
+                            className="flex items-center gap-2 px-6 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
                         >
                             Continuer
                             <SkipForward className="w-4 h-4" />
@@ -363,7 +331,7 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
         );
     }
 
-    // ======= VUE FORMULAIRE SAISIE (inchangée) =======
+    // ======= VUE FORMULAIRE SAISIE =======
     return (
         <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -381,19 +349,11 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                 {/* Liste des examens */}
                 <div className="p-6 space-y-4">
                     {exams.map((exam, index) => (
-                        <div
-                            key={index}
-                            className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3"
-                        >
+                        <div key={index} className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
                             <div className="flex items-center justify-between">
-                                <span className="text-sm font-semibold text-gray-700">
-                                    Examen #{index + 1}
-                                </span>
+                                <span className="text-sm font-semibold text-gray-700">Examen #{index + 1}</span>
                                 {exams.length > 1 && (
-                                    <button
-                                        onClick={() => handleRemoveExam(index)}
-                                        className="p-1 text-red-500 hover:bg-red-50 rounded"
-                                    >
+                                    <button onClick={() => handleRemoveExam(index)} className="p-1 text-red-500 hover:bg-red-50 rounded">
                                         <Trash2 className="w-4 h-4" />
                                     </button>
                                 )}
@@ -401,47 +361,37 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
 
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                                        Type d'examen
-                                    </label>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">Type d'examen</label>
                                     <select
                                         value={exam.type_examen}
-                                        onChange={(e) => handleChangeExam(index, 'type_examen', e.target.value)}
+                                        onChange={e => handleChangeExam(index, 'type_examen', e.target.value)}
                                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500"
                                     >
-                                        {Object.keys(EXAM_TYPES).map((type) => (
-                                            <option key={type} value={type}>
-                                                {type}
-                                            </option>
+                                        {Object.keys(EXAM_TYPES).map(type => (
+                                            <option key={type} value={type}>{type}</option>
                                         ))}
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                                        Nom de l'examen
-                                    </label>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">Nom de l'examen</label>
                                     <select
                                         value={exam.nom_examen}
-                                        onChange={(e) => handleChangeExam(index, 'nom_examen', e.target.value)}
+                                        onChange={e => handleChangeExam(index, 'nom_examen', e.target.value)}
                                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500"
                                     >
-                                        {(EXAM_TYPES[exam.type_examen] || ['Autre']).map((name) => (
-                                            <option key={name} value={name}>
-                                                {name}
-                                            </option>
+                                        {(EXAM_TYPES[exam.type_examen] || ['Autre']).map(name => (
+                                            <option key={name} value={name}>{name}</option>
                                         ))}
                                     </select>
                                 </div>
                             </div>
 
                             <div>
-                                <label className="block text-xs font-medium text-gray-600 mb-1">
-                                    Commentaire (optionnel)
-                                </label>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">Commentaire (optionnel)</label>
                                 <input
                                     type="text"
                                     value={exam.commentaire}
-                                    onChange={(e) => handleChangeExam(index, 'commentaire', e.target.value)}
+                                    onChange={e => handleChangeExam(index, 'commentaire', e.target.value)}
                                     placeholder="Précisions, contexte clinique..."
                                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500"
                                 />
@@ -461,7 +411,7 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                 {/* Boutons */}
                 <div className="flex justify-between items-center p-6 border-t">
                     <button
-                        onClick={handleSkip}
+                        onClick={onComplete}
                         className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 transition-colors"
                     >
                         <SkipForward className="w-4 h-4" />
@@ -473,15 +423,9 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                         className="flex items-center gap-2 px-6 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
                     >
                         {saving ? (
-                            <>
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                                Enregistrement...
-                            </>
+                            <><Loader2 className="w-4 h-4 animate-spin" />Enregistrement...</>
                         ) : (
-                            <>
-                                <Save className="w-4 h-4" />
-                                Enregistrer les examens
-                            </>
+                            <><Save className="w-4 h-4" />Enregistrer les examens</>
                         )}
                     </button>
                 </div>
