@@ -75,14 +75,9 @@ export default function DoctorNotesModal({
         fetchConsultation();
     }, [consultationId, patientId]);
 
-    const notes = consultationData?.notes || '';
-    const diagnostic = consultationData?.diagnostic_principal || '';
-    const conduiteATenir = consultationData?.conduite_a_tenir || '';
-    const synthese = consultationData?.synthese || '';
-    const observations = consultationData?.observations || '';
     const noteAssistante = consultationData?.note_pour_assistante || '';
 
-    const hasContent = notes || diagnostic || conduiteATenir || synthese || observations || noteAssistante;
+    const hasContent = !!noteAssistante;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -122,36 +117,6 @@ export default function DoctorNotesModal({
                                 <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
                                     <h4 className="text-xs font-semibold text-teal-800 uppercase tracking-wider mb-1">Message du médecin pour vous</h4>
                                     <p className="text-sm text-slate-800 whitespace-pre-wrap">{noteAssistante}</p>
-                                </div>
-                            )}
-                            {diagnostic && (
-                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                                    <h4 className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-1">Diagnostic</h4>
-                                    <p className="text-sm text-slate-800">{diagnostic}</p>
-                                </div>
-                            )}
-                            {conduiteATenir && (
-                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                    <h4 className="text-xs font-semibold text-blue-800 uppercase tracking-wider mb-1">Conduite à tenir</h4>
-                                    <p className="text-sm text-slate-800 whitespace-pre-wrap">{conduiteATenir}</p>
-                                </div>
-                            )}
-                            {synthese && (
-                                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                                    <h4 className="text-xs font-semibold text-green-800 uppercase tracking-wider mb-1">Synthèse</h4>
-                                    <p className="text-sm text-slate-800 whitespace-pre-wrap">{synthese}</p>
-                                </div>
-                            )}
-                            {observations && (
-                                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                                    <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">Observations</h4>
-                                    <p className="text-sm text-slate-800 whitespace-pre-wrap">{observations}</p>
-                                </div>
-                            )}
-                            {notes && (
-                                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-                                    <h4 className="text-xs font-semibold text-indigo-800 uppercase tracking-wider mb-1">Notes</h4>
-                                    <p className="text-sm text-slate-800 whitespace-pre-wrap font-mono">{notes}</p>
                                 </div>
                             )}
                         </div>
