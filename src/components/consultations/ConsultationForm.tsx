@@ -560,15 +560,6 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
                 <label className="block text-sm font-medium text-slate-700">Date *</label>
                 <input required type="date" name="date_consultation" value={formData.date_consultation} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2" />
               </div>
-              <div className="col-span-2">
-                <label className="block text-sm font-medium text-slate-700">Statut de la consultation</label>
-                <select name="statutConsultation" value={formData.statutConsultation} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2">
-                  <option value="pre_consultation">Pré-consultation saisie</option>
-                  <option value="en_attente">Patient en salle d'attente</option>
-                  <option value="en_cours">Consultation en cours</option>
-                  <option value="terminee">Consultation terminée</option>
-                </select>
-              </div>
             </div>
 
             <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
@@ -723,7 +714,18 @@ export default function ConsultationForm({ consultation, patientId, fileAttenteI
               </>
             )}
 
-            <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
+            {/* Statut de la consultation — en bas, visible pour médecin et assistante (Évo 6) */}
+            <div className="pt-4 border-t border-slate-200">
+              <label className="block text-sm font-medium text-slate-700">Statut de la consultation</label>
+              <select name="statutConsultation" value={formData.statutConsultation} onChange={handleChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2">
+                <option value="pre_consultation">Pré-consultation saisie</option>
+                <option value="en_attente">Patient en salle d'attente</option>
+                <option value="en_cours">Consultation en cours</option>
+                <option value="terminee">Consultation terminée</option>
+              </select>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4">
               <button type="button" onClick={onClose} className="px-4 py-2 border border-slate-300 rounded-md shadow-sm text-sm font-medium text-slate-700 bg-white hover:bg-slate-50">
                 Annuler
               </button>
