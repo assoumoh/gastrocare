@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, orderBy, doc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { Edit, Trash2, FileSignature, Calendar, Pill, Printer, Eye } from 'lucide-react';
+import { Edit, Trash2, FileSignature, Calendar, Pill, Printer, Eye, Plus, FileText, Paperclip } from 'lucide-react';
 import PrescriptionForm from '../prescriptions/PrescriptionForm';
 import PrescriptionPrintView from '../prescriptions/PrescriptionPrintView';
+import PaperPrescriptionForm from '../prescriptions/PaperPrescriptionForm';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface PatientPrescriptionsProps {
@@ -15,6 +16,7 @@ export default function PatientPrescriptions({ patientId }: PatientPrescriptions
   const [medicaments, setMedicaments] = useState<Record<string, any>>({});
   const [patient, setPatient] = useState<any>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isPaperFormOpen, setIsPaperFormOpen] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
   const [selectedPrescription, setSelectedPrescription] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -86,7 +88,11 @@ export default function PatientPrescriptions({ patientId }: PatientPrescriptions
 
   const handleEdit = (prescription: any) => {
     setSelectedPrescription(prescription);
-    setIsFormOpen(true);
+    if (prescription?.type === 'papier') {
+      setIsPaperFormOpen(true);
+    } else {
+      setIsFormOpen(true);
+    }
   };
 
   const handlePrint = (e: React.MouseEvent, prescription: any) => {
@@ -98,6 +104,7 @@ export default function PatientPrescriptions({ patientId }: PatientPrescriptions
   const handleCloseForm = () => {
     setSelectedPrescription(null);
     setIsFormOpen(false);
+    setIsPaperFormOpen(false);
   };
 
   const handleClosePrint = () => {
@@ -134,8 +141,26 @@ export default function PatientPrescriptions({ patientId }: PatientPrescriptions
         )}
       </div>
 
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-2">
         <h3 className="text-lg font-medium text-slate-900">Ordonnances</h3>
+        {appUser?.role !== 'assistante' && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setSelectedPrescription(null); setIsPaperFormOpen(true); }}
+              className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700"
+              title="Répertorier une ordonnance papier / externe"
+            >
+              <FileText className="-ml-0.5 mr-2 h-4 w-4" />Ordonnance papier
+            </button>
+            <button
+              onClick={() => { setSelectedPrescription(null); setIsFormOpen(true); }}
+              className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+              title="Créer une nouvelle ordonnance structurée"
+            >
+              <Plus className="-ml-0.5 mr-2 h-4 w-4" />Nouvelle ordonnance
+            </button>
+          </div>
+        )}
       </div>
 
       {filteredPrescriptions.length === 0 ? (
@@ -143,50 +168,93 @@ export default function PatientPrescriptions({ patientId }: PatientPrescriptions
           <FileSignature className="mx-auto h-12 w-12 text-slate-400" />
           <h3 className="mt-2 text-sm font-medium text-slate-900">Aucune ordonnance</h3>
           <p className="mt-1 text-sm text-slate-500">
-            Les ordonnances sont créées lors de la consultation.
+            Créez une nouvelle ordonnance ou répertoriez une ordonnance papier existante.
           </p>
         </div>
       ) : (
         <div className="bg-white shadow overflow-hidden sm:rounded-md border border-slate-200">
           <ul className="divide-y divide-slate-200">
-            {filteredPrescriptions.map((prescription) => (
+            {filteredPrescriptions.map((prescription) => {
+              const isPapier = prescription.type === 'papier';
+              return (
               <li key={prescription.id} className="hover:bg-slate-50 transition-colors p-4 sm:px-6 cursor-pointer" onClick={() => appUser?.role !== 'assistante' && handleEdit(prescription)}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-start">
                     <div className="flex-shrink-0 mt-1">
-                      <FileSignature className="h-6 w-6 text-indigo-500" />
+                      {isPapier ? (
+                        <FileText className="h-6 w-6 text-amber-600" />
+                      ) : (
+                        <FileSignature className="h-6 w-6 text-indigo-500" />
+                      )}
                     </div>
                     <div className="ml-4">
-                      <div className="flex items-center">
-                        <Calendar className="mr-1.5 h-4 w-4 text-slate-400" />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Calendar className="mr-0.5 h-4 w-4 text-slate-400" />
                         <span className="text-sm font-medium text-slate-900">
                           {new Date(prescription.date_prescription + 'T12:00:00').toLocaleDateString('fr-FR')}
                         </span>
+                        {isPapier && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                            Papier / externe
+                          </span>
+                        )}
+                        {isPapier && prescription.prescripteur && (
+                          <span className="text-xs text-slate-500">· Dr {prescription.prescripteur}</span>
+                        )}
                       </div>
 
-                      <div className="mt-3 space-y-2">
-                        {prescription.medicaments?.map((med: any, idx: number) => {
-                          const medInfo = medicaments[med.medicament_id];
-                          return (
-                            <div key={idx} className="flex items-start text-sm">
-                              <Pill className="h-4 w-4 text-slate-400 mr-2 mt-0.5" />
-                              <div>
-                                <span className="font-medium text-slate-900">
-                                  {med.nomMedicament || (medInfo ? (medInfo.nomMedicament || medInfo.nom_commercial) : 'Médicament inconnu')}
-                                </span>
-                                <span className="text-slate-500 ml-2">
-                                  {med.posologie} - {med.duree}
-                                </span>
-                              </div>
+                      {isPapier ? (
+                        <>
+                          {prescription.contenu && (
+                            <div className="mt-2 text-sm text-slate-700 whitespace-pre-wrap bg-amber-50 border border-amber-100 rounded-md p-3">
+                              {prescription.contenu}
                             </div>
-                          );
-                        })}
-                      </div>
+                          )}
+                          {prescription.fichier_url && (
+                            <a
+                              href={prescription.fichier_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="mt-2 inline-flex items-center gap-1.5 text-xs text-indigo-600 hover:underline"
+                            >
+                              <Paperclip className="h-3 w-3" />
+                              {prescription.fichier_nom || 'Fichier joint'}
+                            </a>
+                          )}
+                          {prescription.commentaire && (
+                            <div className="mt-2 text-sm text-slate-500 italic">
+                              Note: {prescription.commentaire}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <div className="mt-3 space-y-2">
+                            {prescription.medicaments?.map((med: any, idx: number) => {
+                              const medInfo = medicaments[med.medicament_id];
+                              return (
+                                <div key={idx} className="flex items-start text-sm">
+                                  <Pill className="h-4 w-4 text-slate-400 mr-2 mt-0.5" />
+                                  <div>
+                                    <span className="font-medium text-slate-900">
+                                      {med.nomMedicament || (medInfo ? (medInfo.nomMedicament || medInfo.nom_commercial) : 'Médicament inconnu')}
+                                    </span>
+                                    <span className="text-slate-500 ml-2">
+                                      {med.posologie} - {med.duree}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
 
-                      {prescription.notes && (
-                        <div className="mt-2 text-sm text-slate-600 italic">
-                          Notes: {prescription.notes}
-                        </div>
+                          {prescription.notes && (
+                            <div className="mt-2 text-sm text-slate-600 italic">
+                              Notes: {prescription.notes}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -200,13 +268,15 @@ export default function PatientPrescriptions({ patientId }: PatientPrescriptions
                         <Eye className="h-4 w-4" />
                       </button>
                     )}
-                    <button
-                      onClick={(e) => handlePrint(e, prescription)}
-                      className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
-                      title="Imprimer l'ordonnance"
-                    >
-                      <Printer className="h-4 w-4" />
-                    </button>
+                    {!isPapier && (
+                      <button
+                        onClick={(e) => handlePrint(e, prescription)}
+                        className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
+                        title="Imprimer l'ordonnance"
+                      >
+                        <Printer className="h-4 w-4" />
+                      </button>
+                    )}
                     {appUser?.role !== 'assistante' && (
                       <button
                         onClick={(e) => handleDelete(e, prescription.id)}
@@ -219,13 +289,18 @@ export default function PatientPrescriptions({ patientId }: PatientPrescriptions
                   </div>
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
       )}
 
       {isFormOpen && (
         <PrescriptionForm prescription={selectedPrescription} onClose={handleCloseForm} patientId={patientId} />
+      )}
+
+      {isPaperFormOpen && (
+        <PaperPrescriptionForm prescription={selectedPrescription} patientId={patientId} onClose={handleCloseForm} />
       )}
 
       {isPrintOpen && selectedPrescription && (
