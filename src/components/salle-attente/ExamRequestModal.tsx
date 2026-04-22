@@ -164,42 +164,54 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
 
         return (
             <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto print:bg-white print:p-0">
-                {/* Styles d'impression : saut de page entre documents + isolation de la zone imprimable */}
+                {/* Styles d'impression : une page par demande d'examen */}
                 <style>{`
                     @media print {
-                        @page { margin: 0; }
+                        @page { margin: 1cm; }
+
                         html, body {
                             margin: 0 !important;
                             padding: 0 !important;
                             height: auto !important;
-                            overflow: visible !important;
-                            background: #fff !important;
-                        }
-                        /* Masquer tout le reste de l'app */
-                        body * { visibility: hidden !important; }
-                        /* Ne révéler QUE la zone imprimable et ses descendants */
-                        #printable-area, #printable-area * { visibility: visible !important; }
-                        /* Sortir la zone du flux et lever toutes les contraintes de hauteur/overflow */
-                        #printable-area {
-                            position: absolute !important;
-                            left: 0 !important;
-                            top: 0 !important;
-                            width: 100% !important;
-                            height: auto !important;
+                            min-height: 0 !important;
                             max-height: none !important;
                             overflow: visible !important;
                             background: #fff !important;
                         }
-                        /* Saut de page forcé entre documents */
+
+                        /* 1) Masquer tout, et neutraliser les contraintes qui tronquent l'impression
+                              (overflow caché, hauteurs max, positionnements fixes/absolus) */
+                        body * {
+                            visibility: hidden !important;
+                            overflow: visible !important;
+                            max-height: none !important;
+                            height: auto !important;
+                        }
+                        .fixed, .absolute, .sticky {
+                            position: static !important;
+                            inset: auto !important;
+                        }
+
+                        /* 2) Révéler uniquement la zone imprimable et ses descendants */
+                        #printable-area, #printable-area * {
+                            visibility: visible !important;
+                        }
+                        #printable-area {
+                            display: block !important;
+                            background: #fff !important;
+                        }
+
+                        /* 3) Saut de page forcé entre chaque demande d'examen */
                         .exam-doc-page {
-                            break-after: page;
-                            page-break-after: always;
-                            break-inside: avoid;
-                            page-break-inside: avoid;
+                            break-after: page !important;
+                            page-break-after: always !important;
+                            break-inside: avoid-page !important;
+                            page-break-inside: avoid !important;
+                            border: none !important;
                         }
                         .exam-doc-page:last-child {
-                            break-after: auto;
-                            page-break-after: auto;
+                            break-after: auto !important;
+                            page-break-after: auto !important;
                         }
                     }
                 `}</style>
