@@ -160,6 +160,9 @@ export interface SettingsCabinet {
     nom_cabinet?: string;
     adresse_cabinet?: string;
     telephone_cabinet?: string;
+    email_cabinet?: string;
+    numero_ordre?: string;
+    inpe?: string;
     duree_consultation: number;
     duree_pre_consultation: number;
     duree_creneau_rdv: number;

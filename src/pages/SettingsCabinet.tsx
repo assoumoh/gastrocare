@@ -267,49 +267,42 @@ export default function SettingsCabinet() {
                                 <input type="text" value={formData.nom_cabinet || ''} onChange={(e) => updateField('nom_cabinet', e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" />
                             </div>
 
-                            {/* ===== DROPDOWN SPÉCIALITÉ AVEC RECHERCHE ===== */}
+                            {/* ===== COMBOBOX SPÉCIALITÉ : texte libre + liste filtrée ===== */}
                             <div className="relative">
                                 <label className="block text-sm font-medium text-slate-700">Spécialité</label>
+                                <p className="text-xs text-slate-400 mt-0.5">Saisissez librement ou choisissez dans la liste</p>
                                 <div className="mt-1 relative">
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowSpecialiteDropdown(!showSpecialiteDropdown)}
-                                        className="relative w-full cursor-pointer rounded-md border border-slate-300 bg-white py-2 pl-3 pr-10 text-left text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    >
-                                        <span className={formData.specialite ? 'text-slate-900' : 'text-slate-400'}>
-                                            {formData.specialite || 'Sélectionner une spécialité...'}
-                                        </span>
-                                        <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-                                            <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                            </svg>
-                                        </span>
-                                    </button>
+                                    <input
+                                        type="text"
+                                        value={showSpecialiteDropdown ? specialiteSearch : formData.specialite}
+                                        onFocus={() => {
+                                            setSpecialiteSearch(formData.specialite || '');
+                                            setShowSpecialiteDropdown(true);
+                                        }}
+                                        onChange={(e) => {
+                                            setSpecialiteSearch(e.target.value);
+                                            updateField('specialite', e.target.value);
+                                        }}
+                                        placeholder="Ex: Gastro-entérologie et Hépatologie"
+                                        className="w-full rounded-md border border-slate-300 px-3 py-2 pr-8 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                    />
+                                    <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                                        <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </span>
 
                                     {showSpecialiteDropdown && (
                                         <div className="absolute z-50 mt-1 w-full rounded-md bg-white shadow-lg border border-slate-200">
-                                            {/* Champ de recherche */}
-                                            <div className="p-2 border-b border-slate-100">
-                                                <input
-                                                    type="text"
-                                                    value={specialiteSearch}
-                                                    onChange={(e) => setSpecialiteSearch(e.target.value)}
-                                                    placeholder="Rechercher une spécialité..."
-                                                    autoFocus
-                                                    className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-indigo-500"
-                                                />
-                                            </div>
-                                            {/* Liste déroulante */}
                                             <ul className="max-h-60 overflow-auto py-1">
                                                 {filteredSpecialites.length === 0 ? (
-                                                    <li className="px-3 py-2 text-sm text-slate-500 italic">Aucune spécialité trouvée</li>
+                                                    <li className="px-3 py-2 text-sm text-slate-500 italic">Aucune spécialité correspondante — valeur libre conservée</li>
                                                 ) : (
                                                     filteredSpecialites.map((specialite) => (
                                                         <li
                                                             key={specialite}
-                                                            onClick={() => handleSelectSpecialite(specialite)}
-                                                            className={`cursor-pointer px-3 py-2 text-sm hover:bg-indigo-50 hover:text-indigo-700 ${formData.specialite === specialite ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-700'
-                                                                }`}
+                                                            onMouseDown={() => handleSelectSpecialite(specialite)}
+                                                            className={`cursor-pointer px-3 py-2 text-sm hover:bg-indigo-50 hover:text-indigo-700 ${formData.specialite === specialite ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-700'}`}
                                                         >
                                                             {specialite}
                                                         </li>
@@ -319,12 +312,8 @@ export default function SettingsCabinet() {
                                         </div>
                                     )}
                                 </div>
-                                {/* Fermer le dropdown si on clique ailleurs */}
                                 {showSpecialiteDropdown && (
-                                    <div
-                                        className="fixed inset-0 z-40"
-                                        onClick={() => { setShowSpecialiteDropdown(false); setSpecialiteSearch(''); }}
-                                    />
+                                    <div className="fixed inset-0 z-40" onClick={() => { setShowSpecialiteDropdown(false); setSpecialiteSearch(''); }} />
                                 )}
                             </div>
 
@@ -335,6 +324,18 @@ export default function SettingsCabinet() {
                             <div>
                                 <label className="block text-sm font-medium text-slate-700">Téléphone</label>
                                 <input type="text" value={formData.telephone_cabinet || ''} onChange={(e) => updateField('telephone_cabinet', e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700">Email</label>
+                                <input type="email" value={formData.email_cabinet || ''} onChange={(e) => updateField('email_cabinet', e.target.value)} placeholder="cabinet@exemple.ma" className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700">Numéro d'ordre</label>
+                                <input type="text" value={formData.numero_ordre || ''} onChange={(e) => updateField('numero_ordre', e.target.value)} placeholder="Ex : 12345" className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700">INPE</label>
+                                <input type="text" value={formData.inpe || ''} onChange={(e) => updateField('inpe', e.target.value)} placeholder="Identifiant National du Praticien" className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500" />
                             </div>
                         </div>
 

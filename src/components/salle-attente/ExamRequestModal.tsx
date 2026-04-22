@@ -5,6 +5,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSettings } from '../../hooks/useSettings';
 import {
     X,
     Plus,
@@ -83,6 +84,13 @@ function buildDocuments(exams: ExamEntry[]) {
 function printDocuments(
     documents: { key: string; exams: ExamEntry[]; note: string }[],
     patientName: string,
+    cabinetSettings?: {
+        nom_cabinet?: string;
+        specialite?: string;
+        adresse_cabinet?: string;
+        numero_ordre?: string;
+        inpe?: string;
+    },
 ) {
     const pw = window.open('', '_blank');
     if (!pw) {
@@ -95,12 +103,23 @@ function printDocuments(
     const escHtml = (s: string) =>
         s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+    // Infos cabinet dynamiques avec fallback
+    const nomCabinet   = cabinetSettings?.nom_cabinet   || 'Docteur';
+    const specialite   = cabinetSettings?.specialite    || '';
+    const adresse      = cabinetSettings?.adresse_cabinet || '';
+    const numeroOrdre  = cabinetSettings?.numero_ordre  || '';
+    const inpe         = cabinetSettings?.inpe          || '';
+
+    const piedPage = (numeroOrdre || inpe)
+        ? `<div class="footer-info">${numeroOrdre ? `N° Ordre : ${escHtml(numeroOrdre)}` : ''}${numeroOrdre && inpe ? '&emsp;|&emsp;' : ''}${inpe ? `INPE : ${escHtml(inpe)}` : ''}</div>`
+        : '';
+
     const pages = documents.map(docu => `
         <div class="page">
             <div class="header">
-                <h1>Docteur Elidrissi Laila</h1>
-                <p class="sub">Spécialiste en Gastro-entérologie et Hépatologie</p>
-                <p class="sub">339, immeuble FENNI, bd Mohamed V</p>
+                <h1>${escHtml(nomCabinet)}</h1>
+                ${specialite ? `<p class="sub">${escHtml(specialite)}</p>` : ''}
+                ${adresse    ? `<p class="sub">${escHtml(adresse)}</p>`    : ''}
             </div>
 
             <div class="title-wrap">
@@ -127,6 +146,7 @@ function printDocuments(
                 <span>Signature&nbsp;/&nbsp;Cachet</span>
                 <div class="sig-line"></div>
             </div>
+            ${piedPage}
         </div>
     `).join('\n');
 
@@ -179,6 +199,7 @@ function printDocuments(
   .signature { margin-top: auto; text-align: right; padding-top: 2rem; }
   .signature span { font-size: 13px; font-weight: 600; display: block; margin-bottom: 2.5rem; }
   .sig-line { width: 160px; border-bottom: 1px solid #999; margin-left: auto; }
+  .footer-info { text-align: center; font-size: 11px; color: #777; border-top: 1px solid #ddd; padding-top: 8px; margin-top: 1rem; }
 </style>
 </head>
 <body>
@@ -201,6 +222,7 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
     onClose,
 }) => {
     const { appUser } = useAuth();
+    const { settings } = useSettings();
     const [exams, setExams] = useState<ExamEntry[]>([
         { type_examen: 'Biologie', nom_examen: EXAM_TYPES['Biologie'][0], commentaire: '' },
     ]);
@@ -312,7 +334,7 @@ const ExamRequestModal: React.FC<ExamRequestModalProps> = ({
                     {/* Footer */}
                     <div className="flex justify-between items-center p-5 border-t border-slate-200">
                         <button
-                            onClick={() => printDocuments(documents, patientName)}
+                            onClick={() => printDocuments(documents, patientName, settings)}
                             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors"
                         >
                             <Printer className="w-4 h-4" />

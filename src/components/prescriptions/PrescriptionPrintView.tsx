@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, Printer } from 'lucide-react';
+import { useSettings } from '../../hooks/useSettings';
 
 interface PrescriptionPrintViewProps {
   prescription: any;
@@ -8,124 +9,216 @@ interface PrescriptionPrintViewProps {
   onClose: () => void;
 }
 
-export default function PrescriptionPrintView({ prescription, patient, medicaments, onClose }: PrescriptionPrintViewProps) {
-
-  const handlePrint = () => {
-    window.print();
-  };
-
-  const calculateAge = (birthDateString: string) => {
+function calculateAge(birthDateString: string): string {
     if (!birthDateString) return '';
     const today = new Date();
     const birthDate = new Date(birthDateString);
     let age = today.getFullYear() - birthDate.getFullYear();
     const m = today.getMonth() - birthDate.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
     return `${age} ans`;
-  };
+}
 
-  const age = calculateAge(patient?.date_naissance);
+const escHtml = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-  return (
-    <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto print:bg-white print:p-0">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-8 relative print:shadow-none print:my-0 print:max-w-none print:rounded-none flex flex-col max-h-[90vh] print:max-h-none print:h-auto">
+export default function PrescriptionPrintView({
+    prescription,
+    patient,
+    medicaments,
+    onClose,
+}: PrescriptionPrintViewProps) {
+    const { settings } = useSettings();
 
-        {/* Header - Hidden on print */}
-        <div className="flex justify-between items-center p-4 border-b border-slate-200 print:hidden shrink-0">
-          <h2 className="text-lg font-semibold text-slate-900">Aperçu de l'ordonnance</h2>
-          <div className="flex space-x-2">
-            <button
-              onClick={handlePrint}
-              className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
-            >
-              <Printer className="mr-2 h-4 w-4" />
-              Imprimer
-            </button>
-            <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-500 rounded-full hover:bg-slate-100">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
+    const handlePrint = () => {
+        const pw = window.open('', '_blank');
+        if (!pw) {
+            alert("Veuillez autoriser les popups pour ce site afin d'imprimer.");
+            return;
+        }
 
-        {/* Printable Area — centré avec marges uniformes */}
-        <div className="p-12 print:p-8 bg-white text-black overflow-y-auto grow" id="printable-area">
+        const age          = calculateAge(patient?.date_naissance);
+        const dateOrdonnance = new Date(prescription?.date_prescription || new Date()).toLocaleDateString('fr-FR');
 
+        // Infos cabinet dynamiques avec fallback
+        const nomCabinet  = settings?.nom_cabinet   || 'Docteur';
+        const specialite  = settings?.specialite    || '';
+        const adresse     = settings?.adresse_cabinet || '';
+        const numeroOrdre = settings?.numero_ordre  || '';
+        const inpe        = settings?.inpe          || '';
 
-          {/* Doctor Header */}
-          <div className="text-center mb-12 border-b-2 border-slate-800 pb-6">
-            <h1 className="text-2xl font-bold uppercase tracking-wider text-slate-900">Docteur Elidrissi Laila</h1>
-            <p className="text-sm text-slate-600 mt-1">Spécialiste en Gastro-entérologie et Hépatologie</p>
-            <p className="text-sm text-slate-600">339, immeuble FENNI, bd Mohamed V</p>
-          </div>
+        const piedPage = (numeroOrdre || inpe)
+            ? `<div class="footer-info">${numeroOrdre ? `N° Ordre : ${escHtml(numeroOrdre)}` : ''}${numeroOrdre && inpe ? '&emsp;|&emsp;' : ''}${inpe ? `INPE : ${escHtml(inpe)}` : ''}</div>`
+            : '';
 
-          <div className="text-center mb-10">
-            <h2 className="text-xl font-bold uppercase tracking-widest text-slate-900 border-2 border-slate-900 inline-block px-6 py-2">
-              Ordonnance Médicale
-            </h2>
-          </div>
+        const medsHtml = (prescription?.medicaments || []).map((med: any, idx: number) => {
+            const medInfo      = medicaments[med.medicament_id];
+            const nomMed       = medInfo ? (medInfo.nomMedicament || medInfo.nom_commercial) : (med.nomMedicament || 'Médicament inconnu');
+            const dosage       = medInfo?.dosage ? ` ${medInfo.dosage} ${medInfo.uniteDosage || ''}` : '';
+            const forme        = medInfo?.forme  ? ` — ${medInfo.forme}` : '';
+            return `
+            <div class="med-item">
+                <p class="med-name">&bull;&nbsp;${escHtml(nomMed)}${escHtml(dosage)}${escHtml(forme)}</p>
+                <p class="med-detail"><strong>Posologie :</strong>&nbsp;${escHtml(med.posologie || '')}</p>
+                <p class="med-detail"><strong>Durée :</strong>&nbsp;${escHtml(med.duree || '')}</p>
+                ${med.instructions_speciales ? `<p class="med-note">Note : ${escHtml(med.instructions_speciales)}</p>` : ''}
+            </div>`;
+        }).join('');
 
-          <div className="flex justify-between items-start mb-12 text-base">
-            <div className="space-y-1">
-              <p><span className="font-semibold">Patient :</span> {patient?.nom} {patient?.prenom}</p>
-              <p>
-                {age && <span>{age}</span>}
-                {patient?.poids && <span>, {patient.poids} kg</span>}
-              </p>
-              {patient?.allergies && (
-                <p className="text-red-600 font-medium mt-2">Allergies : {patient.allergies}</p>
-              )}
-            </div>
-            <div className="text-right">
-              <p>Le {new Date(prescription?.date_prescription || new Date()).toLocaleDateString('fr-FR')}</p>
-            </div>
-          </div>
+        const notesHtml = prescription?.notes
+            ? `<div class="notes-block"><p class="notes-title">Notes :</p><p class="notes-body">${escHtml(prescription.notes)}</p></div>`
+            : '';
 
-          <div className="space-y-6 mb-16 min-h-[300px]">
-            {prescription?.medicaments?.map((med: any, idx: number) => {
-              const medInfo = medicaments[med.medicament_id];
-              const nomMedicament = medInfo ? (medInfo.nomMedicament || medInfo.nom_commercial) : (med.nomMedicament || 'Médicament inconnu');
-              const dosage = medInfo?.dosage ? ` ${medInfo.dosage} ${medInfo.uniteDosage || ''}` : '';
-              const forme = medInfo?.forme ? ` - ${medInfo.forme}` : '';
+        pw.document.write(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Ordonnance — ${escHtml((patient?.nom || '') + ' ' + (patient?.prenom || ''))}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; background: #fff; color: #111; }
+  @page { size: A4; margin: 1.5cm; }
 
-              return (
-                <div key={idx} className="pl-4 border-l-4 border-slate-200">
-                  <p className="font-bold text-lg text-slate-900">
-                    • {nomMedicament}{dosage}{forme}
-                  </p>
-                  <p className="text-base text-slate-800 mt-1 ml-4">
-                    <span className="font-semibold">Posologie :</span> {med.posologie}
-                  </p>
-                  <p className="text-base text-slate-800 ml-4">
-                    <span className="font-semibold">Durée :</span> {med.duree}
-                  </p>
-                  {med.instructions_speciales && (
-                    <p className="text-sm text-slate-600 italic ml-4 mt-1">
-                      Note : {med.instructions_speciales}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+  .page { min-height: 24cm; display: flex; flex-direction: column; padding-bottom: 0.5cm; }
 
-          {prescription?.notes && (
-            <div className="mb-12 pt-6 border-t border-slate-200">
-              <p className="font-semibold mb-2">Notes :</p>
-              <p className="whitespace-pre-wrap text-slate-800">{prescription.notes}</p>
-            </div>
-          )}
+  .header { text-align: center; border-bottom: 2px solid #111; padding-bottom: 1rem; margin-bottom: 2rem; }
+  .header h1 { font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; }
+  .header .sub { font-size: 12px; color: #555; margin-top: 3px; }
 
-          <div className="flex justify-end mt-20">
-            <div className="text-center">
-              <p className="font-semibold mb-16">Signature / Cachet</p>
-              <div className="w-48 border-b border-slate-300"></div>
-            </div>
-          </div>
+  .title-wrap { text-align: center; margin-bottom: 2rem; }
+  .title-box { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; border: 2px solid #111; display: inline-block; padding: 7px 24px; }
 
-        </div>
-      </div>
+  .patient-row { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 0.5rem; }
+  .patient-info { margin-bottom: 1.5rem; }
+  .patient-meta { font-size: 13px; color: #444; margin-top: 3px; }
+  .allergies { font-size: 13px; color: #c00; font-weight: 600; margin-top: 4px; }
+
+  .meds { flex: 1; margin-bottom: 1rem; }
+  .med-item { padding: 10px 0 10px 14px; border-left: 4px solid #ccc; margin-bottom: 12px; }
+  .med-name { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+  .med-detail { font-size: 13px; color: #333; margin-left: 12px; margin-top: 2px; }
+  .med-note { font-size: 12px; color: #666; font-style: italic; margin-left: 12px; margin-top: 3px; }
+
+  .notes-block { border-top: 1px solid #ddd; padding-top: 1rem; margin-bottom: 1rem; }
+  .notes-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .notes-body { font-size: 13px; white-space: pre-wrap; }
+
+  .signature { margin-top: auto; text-align: right; padding-top: 2rem; }
+  .signature span { font-size: 13px; font-weight: 600; display: block; margin-bottom: 2.5rem; }
+  .sig-line { width: 160px; border-bottom: 1px solid #999; margin-left: auto; }
+
+  .footer-info { text-align: center; font-size: 11px; color: #777; border-top: 1px solid #ddd; padding-top: 8px; margin-top: 1rem; }
+</style>
+</head>
+<body>
+<div class="page">
+    <div class="header">
+        <h1>${escHtml(nomCabinet)}</h1>
+        ${specialite ? `<p class="sub">${escHtml(specialite)}</p>` : ''}
+        ${adresse    ? `<p class="sub">${escHtml(adresse)}</p>`    : ''}
     </div>
-  );
+
+    <div class="title-wrap">
+        <span class="title-box">Ordonnance Médicale</span>
+    </div>
+
+    <div class="patient-info">
+        <div class="patient-row">
+            <span><strong>Patient&nbsp;:</strong>&nbsp;${escHtml((patient?.nom || '') + ' ' + (patient?.prenom || ''))}</span>
+            <span>Le&nbsp;${dateOrdonnance}</span>
+        </div>
+        ${(age || patient?.poids) ? `<p class="patient-meta">${age ? age : ''}${age && patient?.poids ? ', ' : ''}${patient?.poids ? patient.poids + ' kg' : ''}</p>` : ''}
+        ${patient?.allergies ? `<p class="allergies">Allergies : ${escHtml(patient.allergies)}</p>` : ''}
+    </div>
+
+    <div class="meds">
+        ${medsHtml}
+    </div>
+
+    ${notesHtml}
+
+    <div class="signature">
+        <span>Signature&nbsp;/&nbsp;Cachet</span>
+        <div class="sig-line"></div>
+    </div>
+
+    ${piedPage}
+</div>
+</body>
+</html>`);
+
+        pw.document.close();
+        setTimeout(() => { pw.focus(); pw.print(); }, 400);
+    };
+
+    const age = calculateAge(patient?.date_naissance);
+
+    return (
+        <div className="fixed inset-0 bg-slate-900/50 flex items-start justify-center p-4 sm:p-6 z-50 overflow-y-auto">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl my-8">
+
+                {/* Header */}
+                <div className="flex justify-between items-center p-5 border-b border-slate-200">
+                    <div>
+                        <h2 className="text-lg font-semibold text-slate-900">Ordonnance médicale</h2>
+                        <p className="text-sm text-slate-500 mt-0.5">
+                            {patient?.nom} {patient?.prenom}{age ? ` — ${age}` : ''}
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={handlePrint}
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+                        >
+                            <Printer className="w-4 h-4" />
+                            Imprimer
+                        </button>
+                        <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+                            <X className="h-5 w-5" />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Aperçu screen simplifié */}
+                <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
+                    <div className="text-center border-b pb-3">
+                        <p className="font-bold text-slate-900">{settings?.nom_cabinet || 'Docteur'}</p>
+                        {settings?.specialite && <p className="text-xs text-slate-500">{settings.specialite}</p>}
+                        {settings?.adresse_cabinet && <p className="text-xs text-slate-400">{settings.adresse_cabinet}</p>}
+                    </div>
+
+                    <div className="flex justify-between text-sm">
+                        <span className="font-medium">{patient?.nom} {patient?.prenom}{age ? ` (${age})` : ''}</span>
+                        <span className="text-slate-500">
+                            {new Date(prescription?.date_prescription || new Date()).toLocaleDateString('fr-FR')}
+                        </span>
+                    </div>
+
+                    {patient?.allergies && (
+                        <p className="text-sm text-red-600 font-medium">Allergies : {patient.allergies}</p>
+                    )}
+
+                    <div className="space-y-3">
+                        {prescription?.medicaments?.map((med: any, idx: number) => {
+                            const medInfo = medicaments[med.medicament_id];
+                            const nomMed = medInfo ? (medInfo.nomMedicament || medInfo.nom_commercial) : (med.nomMedicament || 'Médicament inconnu');
+                            return (
+                                <div key={idx} className="pl-3 border-l-4 border-slate-200">
+                                    <p className="font-bold text-sm text-slate-900">• {nomMed}</p>
+                                    <p className="text-sm text-slate-700 ml-3">Posologie : {med.posologie}</p>
+                                    <p className="text-sm text-slate-700 ml-3">Durée : {med.duree}</p>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                <div className="flex justify-end p-5 border-t border-slate-200">
+                    <button onClick={onClose} className="px-4 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50">
+                        Fermer
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 }
