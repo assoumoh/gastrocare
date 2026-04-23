@@ -4,7 +4,8 @@ import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Calendar, Users, Activity, AlertCircle, FileText, Pill,
-  Clock, CheckCircle, UserPlus, FileSignature, Files, ChevronRight, User, Stethoscope, ClipboardList
+  Clock, CheckCircle, UserPlus, FileSignature, Files, ChevronRight, User, Stethoscope, ClipboardList,
+  PlayCircle, ArrowRight
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
@@ -108,6 +109,30 @@ export default function Dashboard() {
   const filePreConsult = fileActive.filter(e => e.statut === 'en_pre_consultation').length;
   const fileEnConsult = fileActive.filter(e => e.statut === 'en_consultation').length;
   const fileTermines = fileAttente.filter(e => e.statut === 'termine').length;
+  const filePrets = fileActive.filter(e => e.statut === 'pret').length;
+
+  // Prochain patient : priorité "pret" > "en_pre_consultation" > "en_attente", par numero_ordre croissant
+  const priorityOrder: Record<string, number> = { pret: 0, en_pre_consultation: 1, en_attente: 2, en_consultation: 3 };
+  const nextPatient = [...fileActive].sort((a, b) => {
+    const pa = priorityOrder[a.statut] ?? 99;
+    const pb = priorityOrder[b.statut] ?? 99;
+    if (pa !== pb) return pa - pb;
+    return a.numero_ordre - b.numero_ordre;
+  })[0];
+  const nextPatientData = nextPatient ? patientsMap[nextPatient.patient_id] : null;
+
+  const nextStatutLabel: Record<string, string> = {
+    pret:                 'Prêt à consulter',
+    en_pre_consultation:  'En pré-consultation',
+    en_attente:           'En attente',
+    en_consultation:      'Déjà en consultation',
+  };
+  const nextStatutColor: Record<string, string> = {
+    pret:                 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    en_pre_consultation:  'bg-amber-100 text-amber-700 border-amber-200',
+    en_attente:           'bg-orange-100 text-orange-700 border-orange-200',
+    en_consultation:      'bg-indigo-100 text-indigo-700 border-indigo-200',
+  };
 
   const prescriptionsToday = prescriptions.filter(p => p.date_prescription === todayStr);
 
@@ -128,34 +153,129 @@ export default function Dashboard() {
         <div className="text-sm text-slate-500">Bonjour, {appUser?.prenom} {appUser?.nom} ({appUser?.role})</div>
       </div>
 
-      {/* Bloc activité du jour */}
-      <div>
-        <h2 className="text-lg font-medium text-slate-900 mb-4">Activité du jour</h2>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          <div className="bg-white overflow-hidden shadow rounded-lg border border-slate-200 p-4">
-            <dt className="text-sm font-medium text-slate-500 truncate">RDV du jour</dt>
-            <dd className="mt-1 text-2xl font-semibold text-indigo-600">{appointments.length}</dd>
+      {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+      {/* HERO "Maintenant" — prochain patient + mini-stats file d'attente    */}
+      {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+      <div className="relative overflow-hidden rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-600 via-indigo-700 to-purple-700 text-white shadow-lg">
+        {/* Décoration */}
+        <div className="absolute -top-20 -right-20 w-64 h-64 bg-white/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-16 -left-16 w-48 h-48 bg-purple-300/20 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative p-5 sm:p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" />
+              </div>
+              <span className="text-xs font-semibold uppercase tracking-wider text-indigo-100">Maintenant · Temps réel</span>
+            </div>
+            <span className="text-xs text-indigo-100">
+              {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </span>
           </div>
-          <div className="bg-white overflow-hidden shadow rounded-lg border border-slate-200 p-4">
-            <dt className="text-sm font-medium text-slate-500 truncate flex items-center"><Clock className="h-4 w-4 mr-1 text-orange-500" />En attente</dt>
-            <dd className="mt-1 text-2xl font-semibold text-orange-600">{fileEnAttente}</dd>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            {/* Col 1-2 : Prochain patient */}
+            <div className="lg:col-span-2">
+              {nextPatient ? (
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-indigo-200 mb-1">Prochain patient</p>
+                  <div className="flex items-start gap-4">
+                    <div className="flex-shrink-0 h-14 w-14 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center border border-white/30">
+                      <span className="text-2xl font-bold">{nextPatient.numero_ordre}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h2 className="text-2xl sm:text-3xl font-bold leading-tight truncate">
+                        {nextPatientData ? `${nextPatientData.nom} ${nextPatientData.prenom}` : 'Patient inconnu'}
+                      </h2>
+                      <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${nextStatutColor[nextPatient.statut] || 'bg-white/10 text-white border-white/20'}`}>
+                          {nextStatutLabel[nextPatient.statut] || nextPatient.statut}
+                        </span>
+                        <span className="text-sm text-indigo-100">
+                          Arrivée {nextPatient.heure_arrivee || '—'}
+                        </span>
+                        {nextPatient.motif && (
+                          <span className="text-sm text-indigo-100">· {nextPatient.motif}</span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-4">
+                        <Link
+                          to={`/patients/${nextPatient.patient_id}?consultationMode=active&tab=consultations`}
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-white text-indigo-700 rounded-lg text-sm font-semibold shadow hover:bg-indigo-50 transition-colors"
+                        >
+                          <PlayCircle className="w-4 h-4" />
+                          Démarrer la consultation
+                        </Link>
+                        <Link
+                          to="/salle-attente"
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-white/15 backdrop-blur-sm border border-white/30 rounded-lg text-sm font-medium hover:bg-white/25 transition-colors"
+                        >
+                          Voir la file
+                          <ArrowRight className="w-4 h-4" />
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-4 py-2">
+                  <div className="h-14 w-14 rounded-2xl bg-white/15 flex items-center justify-center border border-white/20">
+                    <CheckCircle className="w-7 h-7 text-emerald-300" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-semibold">Aucun patient en file</h2>
+                    <p className="text-sm text-indigo-100 mt-0.5">
+                      {fileTermines > 0
+                        ? `Journée en cours : ${fileTermines} consultation${fileTermines > 1 ? 's' : ''} terminée${fileTermines > 1 ? 's' : ''}.`
+                        : 'La file d\'attente est vide pour le moment.'}
+                    </p>
+                    <Link to="/salle-attente" className="inline-flex items-center gap-1 mt-2 text-sm font-medium text-white hover:underline">
+                      Accéder à la salle d'attente <ArrowRight className="w-4 h-4" />
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Col 3 : mini-stats file */}
+            <div className="grid grid-cols-2 gap-2 content-start">
+              <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3 border border-white/15">
+                <div className="flex items-center gap-1.5 text-xs text-indigo-100 mb-1">
+                  <Clock className="w-3.5 h-3.5" /> En attente
+                </div>
+                <div className="text-2xl font-bold">{fileEnAttente}</div>
+              </div>
+              <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3 border border-white/15">
+                <div className="flex items-center gap-1.5 text-xs text-indigo-100 mb-1">
+                  <ClipboardList className="w-3.5 h-3.5" /> Pré-consult
+                </div>
+                <div className="text-2xl font-bold">{filePreConsult}</div>
+              </div>
+              <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3 border border-white/15">
+                <div className="flex items-center gap-1.5 text-xs text-indigo-100 mb-1">
+                  <Stethoscope className="w-3.5 h-3.5" /> En consult.
+                </div>
+                <div className="text-2xl font-bold">{fileEnConsult}</div>
+              </div>
+              <div className="bg-emerald-400/20 backdrop-blur-sm rounded-lg p-3 border border-emerald-300/30">
+                <div className="flex items-center gap-1.5 text-xs text-emerald-100 mb-1">
+                  <CheckCircle className="w-3.5 h-3.5" /> Terminés
+                </div>
+                <div className="text-2xl font-bold">{fileTermines}</div>
+              </div>
+              {filePrets > 0 && (
+                <div className="col-span-2 bg-emerald-500/30 backdrop-blur-sm rounded-lg p-2.5 border border-emerald-300/40">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-emerald-50">
+                      ⚡ {filePrets} patient{filePrets > 1 ? 's' : ''} prêt{filePrets > 1 ? 's' : ''} à consulter
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="bg-white overflow-hidden shadow rounded-lg border border-slate-200 p-4">
-            <dt className="text-sm font-medium text-slate-500 truncate flex items-center"><ClipboardList className="h-4 w-4 mr-1 text-yellow-500" />Pré-consult</dt>
-            <dd className="mt-1 text-2xl font-semibold text-yellow-600">{filePreConsult}</dd>
-          </div>
-          <div className="bg-white overflow-hidden shadow rounded-lg border border-slate-200 p-4">
-            <dt className="text-sm font-medium text-slate-500 truncate flex items-center"><Stethoscope className="h-4 w-4 mr-1 text-indigo-500" />En consultation</dt>
-            <dd className="mt-1 text-2xl font-semibold text-blue-600">{fileEnConsult}</dd>
-          </div>
-          <div className="bg-white overflow-hidden shadow rounded-lg border border-slate-200 p-4">
-            <dt className="text-sm font-medium text-slate-500 truncate flex items-center"><CheckCircle className="h-4 w-4 mr-1 text-green-500" />Terminés</dt>
-            <dd className="mt-1 text-2xl font-semibold text-green-600">{fileTermines}</dd>
-          </div>
-          <Link to="/salle-attente" className="bg-indigo-50 overflow-hidden shadow rounded-lg border border-indigo-200 p-4 hover:bg-indigo-100 transition-colors">
-            <dt className="text-sm font-medium text-indigo-700 truncate">Salle d'attente</dt>
-            <dd className="mt-1 text-2xl font-semibold text-indigo-600">{fileActive.length} <span className="text-sm font-normal">en file</span></dd>
-          </Link>
         </div>
       </div>
 
