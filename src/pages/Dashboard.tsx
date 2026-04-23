@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { format as dateFnsFormat } from 'date-fns';
 import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -35,9 +36,8 @@ export default function Dashboard() {
   useEffect(() => {
     if (!appUser) return;
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayStr = today.toISOString().split('T')[0];
+    // ⚠️ NE PAS utiliser setHours(0,0,0,0)+toISOString() → donne la veille en UTC+1
+    const todayStr = dateFnsFormat(new Date(), 'yyyy-MM-dd');
 
     const unsubRecentPatients = onSnapshot(
       query(collection(db, 'patients'), orderBy('created_at', 'desc'), limit(10)),
@@ -152,7 +152,7 @@ export default function Dashboard() {
     };
   }, [appUser]);
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = dateFnsFormat(new Date(), 'yyyy-MM-dd');
 
   // Stats file d'attente
   const fileActive = fileAttente.filter(e => e.statut !== 'termine' && e.statut !== 'annule');

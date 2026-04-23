@@ -1,310 +1,558 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
-import { useAuth } from '../contexts/AuthContext';
-import { DollarSign, TrendingUp, CreditCard, Calendar, Activity, PieChart, FileText, AlertCircle } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart as RechartsPieChart, Pie, Cell } from 'recharts';
+import { format, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subWeeks } from 'date-fns';
+import { fr } from 'date-fns/locale';
+import {
+    DollarSign, TrendingUp, TrendingDown, AlertCircle, CreditCard,
+    Users, BarChart2, CheckCircle, Clock, ChevronRight, Search, X
+} from 'lucide-react';
+import {
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+    PieChart, Pie, Cell, Legend, LineChart, Line, Area, AreaChart,
+} from 'recharts';
+import { Link } from 'react-router-dom';
 
-const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
+// ─── Constantes ───────────────────────────────────────────────────────────────
+const COLORS     = ['#4f46e5', '#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#ec4899'];
+const PAID_SET   = new Set(['payé', 'paye', 'réglé', 'regle']);
+const UNPAID_SET = new Set(['non payé', 'non_paye', 'en_attente', 'en attente']);
 
-export default function Finance() {
-  const { appUser } = useAuth();
-  const [payments, setPayments] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('month'); // 'day', 'week', 'month', 'year', 'all'
+type Period = 'day' | 'week' | 'month' | 'quarter' | 'year';
 
-  useEffect(() => {
-    const q = query(collection(db, 'payments'), orderBy('date_paiement', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
+const PERIOD_LABELS: Record<Period, string> = {
+    day:     'Aujourd\'hui',
+    week:    '7 jours',
+    month:   'Ce mois',
+    quarter: 'Ce trimestre',
+    year:    'Cette année',
+};
 
-  // Filter payments based on selected timeframe
-  const getFilteredPayments = () => {
-    const now = new Date();
-    return payments.filter(p => {
-      const pDate = new Date(p.date_paiement);
-      if (filter === 'day') {
-        return pDate.toDateString() === now.toDateString();
-      }
-      if (filter === 'week') {
-        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        return pDate >= weekAgo;
-      }
-      if (filter === 'month') {
-        return pDate.getMonth() === now.getMonth() && pDate.getFullYear() === now.getFullYear();
-      }
-      if (filter === 'year') {
-        return pDate.getFullYear() === now.getFullYear();
-      }
-      return true; // 'all'
-    });
-  };
+const fmtMAD = (n: number) =>
+    new Intl.NumberFormat('fr-MA', { maximumFractionDigits: 0 }).format(n) + ' MAD';
 
-  const filteredPayments = getFilteredPayments();
+const pct = (a: number, b: number) =>
+    b === 0 ? null : Math.round((a / b) * 100);
 
-  // Calculate KPIs
-  const totalRevenue = filteredPayments.filter(p => p.statut_paiement === 'payé' || p.statut_paiement === 'réglé').reduce((sum, p) => sum + (Number(p.montant) || 0), 0);
-  const totalPending = filteredPayments.filter(p => p.statut_paiement === 'non payé' || p.statut_paiement === 'en_attente').reduce((sum, p) => sum + (Number(p.montant) || 0), 0);
-  const totalPartial = filteredPayments.filter(p => p.statut_paiement === 'partiel').reduce((sum, p) => sum + (Number(p.montant) || 0), 0);
-  const totalPayments = filteredPayments.length;
-  const averagePayment = totalPayments > 0 ? totalRevenue / totalPayments : 0;
-  
-  const totalConsultations = filteredPayments.filter(p => p.type_paiement === 'consultation').reduce((sum, p) => sum + (Number(p.montant) || 0), 0);
-  const totalExamens = filteredPayments.filter(p => p.type_paiement === 'examen').reduce((sum, p) => sum + (Number(p.montant) || 0), 0);
-
-  // Payment methods breakdown
-  const paymentMethods = filteredPayments.reduce((acc, p) => {
-    const method = p.mode_paiement || 'inconnu';
-    acc[method] = (acc[method] || 0) + (Number(p.montant) || 0);
-    return acc;
-  }, {} as Record<string, number>);
-
-  const pieChartData = Object.entries(paymentMethods).map(([name, value]) => ({ name, value }));
-
-  // Revenue over time (daily for week/month, monthly for year)
-  const getRevenueData = () => {
-    const data: Record<string, number> = {};
-    const sortedPayments = [...filteredPayments].sort((a, b) => new Date(a.date_paiement).getTime() - new Date(b.date_paiement).getTime());
-    
-    sortedPayments.forEach(p => {
-      if (p.statut_paiement !== 'payé' && p.statut_paiement !== 'réglé') return;
-      const date = new Date(p.date_paiement);
-      let key = '';
-      if (filter === 'year' || filter === 'all') {
-        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      } else {
-        key = date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
-      }
-      data[key] = (data[key] || 0) + (Number(p.montant) || 0);
-    });
-
-    return Object.entries(data).map(([date, amount]) => ({ date, amount }));
-  };
-
-  const revenueData = getRevenueData();
-
-  if (loading) {
-    return <div className="text-center py-12 text-slate-500">Chargement des données financières...</div>;
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="sm:flex sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Tableau de bord financier</h1>
-        <div className="mt-4 sm:mt-0 flex space-x-2">
-          <select 
-            value={filter} 
-            onChange={(e) => setFilter(e.target.value)}
-            className="block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border px-3 py-2"
-          >
-            <option value="day">Aujourd'hui</option>
-            <option value="week">7 derniers jours</option>
-            <option value="month">Ce mois</option>
-            <option value="year">Cette année</option>
-            <option value="all">Tout</option>
-          </select>
+// ─── Tooltip custom ───────────────────────────────────────────────────────────
+const CustomTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    return (
+        <div className="bg-white border border-slate-200 rounded-xl shadow-lg px-3 py-2 text-xs">
+            <p className="font-semibold text-slate-800 mb-1">{label}</p>
+            {payload.map((p: any, i: number) => (
+                <p key={i} style={{ color: p.color }} className="font-medium">
+                    {p.name} : {typeof p.value === 'number' ? fmtMAD(p.value) : p.value}
+                </p>
+            ))}
         </div>
-      </div>
+    );
+};
 
-      {/* KPIs */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="bg-white overflow-hidden shadow rounded-lg border border-slate-200">
-          <div className="p-5">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <div className="rounded-md p-3 bg-emerald-100">
-                  <DollarSign className="h-6 w-6 text-emerald-600" aria-hidden="true" />
-                </div>
-              </div>
-              <div className="ml-5 w-0 flex-1">
-                <dl>
-                  <dt className="text-sm font-medium text-slate-500 truncate">Revenu Encaissé</dt>
-                  <dd>
-                    <div className="text-2xl font-semibold text-slate-900">{totalRevenue.toLocaleString('fr-MA')} MAD</div>
-                  </dd>
-                </dl>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white overflow-hidden shadow rounded-lg border border-slate-200">
-          <div className="p-5">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <div className="rounded-md p-3 bg-red-100">
-                  <AlertCircle className="h-6 w-6 text-red-600" aria-hidden="true" />
-                </div>
-              </div>
-              <div className="ml-5 w-0 flex-1">
-                <dl>
-                  <dt className="text-sm font-medium text-slate-500 truncate">En Attente / Non Payé</dt>
-                  <dd>
-                    <div className="text-2xl font-semibold text-slate-900">{totalPending.toLocaleString('fr-MA')} MAD</div>
-                  </dd>
-                </dl>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white overflow-hidden shadow rounded-lg border border-slate-200">
-          <div className="p-5">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <div className="rounded-md p-3 bg-indigo-100">
-                  <Activity className="h-6 w-6 text-indigo-600" aria-hidden="true" />
-                </div>
-              </div>
-              <div className="ml-5 w-0 flex-1">
-                <dl>
-                  <dt className="text-sm font-medium text-slate-500 truncate">Consultations</dt>
-                  <dd>
-                    <div className="text-2xl font-semibold text-slate-900">{totalConsultations.toLocaleString('fr-MA')} MAD</div>
-                  </dd>
-                </dl>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white overflow-hidden shadow rounded-lg border border-slate-200">
-          <div className="p-5">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <div className="rounded-md p-3 bg-blue-100">
-                  <FileText className="h-6 w-6 text-blue-600" aria-hidden="true" />
-                </div>
-              </div>
-              <div className="ml-5 w-0 flex-1">
-                <dl>
-                  <dt className="text-sm font-medium text-slate-500 truncate">Examens</dt>
-                  <dd>
-                    <div className="text-2xl font-semibold text-slate-900">{totalExamens.toLocaleString('fr-MA')} MAD</div>
-                  </dd>
-                </dl>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Charts / Analysis */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="bg-white shadow rounded-lg p-6 border border-slate-200">
-          <h2 className="text-lg font-medium text-slate-900 mb-4 flex items-center">
-            <TrendingUp className="mr-2 h-5 w-5 text-slate-400" />
-            Évolution des revenus
-          </h2>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={revenueData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(value) => `${value}`} />
-                <Tooltip 
-                  cursor={{ fill: '#f1f5f9' }}
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  formatter={(value: number) => [`${value.toLocaleString('fr-MA')} MAD`, 'Revenu']}
-                />
-                <Bar dataKey="amount" fill="#4f46e5" radius={[4, 4, 0, 0]} maxBarSize={50} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="bg-white shadow rounded-lg p-6 border border-slate-200">
-          <h2 className="text-lg font-medium text-slate-900 mb-4 flex items-center">
-            <PieChart className="mr-2 h-5 w-5 text-slate-400" />
-            Répartition par mode de paiement
-          </h2>
-          <div className="h-72 flex items-center justify-center">
-            {pieChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <RechartsPieChart>
-                  <Pie
-                    data={pieChartData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {pieChartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    formatter={(value: number) => [`${value.toLocaleString('fr-MA')} MAD`, 'Montant']}
-                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  />
-                  <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                </RechartsPieChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className="text-sm text-slate-500">Aucune donnée pour cette période.</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white shadow rounded-lg p-6 border border-slate-200">
-        <h2 className="text-lg font-medium text-slate-900 mb-4 flex items-center">
-          <Calendar className="mr-2 h-5 w-5 text-slate-400" />
-          Derniers paiements
-        </h2>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-50">
-              <tr>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Date</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Type</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Mode</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Montant</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Statut</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-slate-200">
-              {filteredPayments.slice(0, 10).map((payment) => (
-                <tr key={payment.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                    {new Date(payment.date_paiement).toLocaleDateString('fr-FR')}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 capitalize">
-                    {payment.type_paiement || 'Consultation'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 capitalize">
-                    {payment.mode_paiement}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
-                    {Number(payment.montant).toLocaleString('fr-MA')} MAD
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${
-                      (payment.statut_paiement === 'payé' || payment.statut_paiement === 'réglé') ? 'bg-green-100 text-green-800' : 
-                      (payment.statut_paiement === 'non payé' || payment.statut_paiement === 'en_attente') ? 'bg-red-100 text-red-800' : 'bg-orange-100 text-orange-800'
-                    }`}>
-                      {payment.statut_paiement}
+// ─── Composant KPI card ───────────────────────────────────────────────────────
+const FinKpi = ({
+    label, value, sub, icon, accent, trend,
+}: {
+    label: string; value: string; sub?: string; icon: React.ReactNode;
+    accent: 'emerald' | 'rose' | 'indigo' | 'amber' | 'sky';
+    trend?: { value: number; label: string };
+}) => {
+    const cls: Record<string, string> = {
+        emerald: 'bg-emerald-50 text-emerald-700',
+        rose:    'bg-rose-50 text-rose-700',
+        indigo:  'bg-indigo-50 text-indigo-700',
+        amber:   'bg-amber-50 text-amber-700',
+        sky:     'bg-sky-50 text-sky-700',
+    };
+    const textCls: Record<string, string> = {
+        emerald: 'text-emerald-700', rose: 'text-rose-700', indigo: 'text-indigo-700',
+        amber: 'text-amber-700', sky: 'text-sky-700',
+    };
+    return (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-start justify-between mb-3">
+                <div className={`p-2.5 rounded-xl ${cls[accent]}`}>{icon}</div>
+                {trend && (
+                    <span className={`inline-flex items-center gap-0.5 text-xs font-semibold ${trend.value >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {trend.value >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                        {trend.value >= 0 ? '+' : ''}{trend.value}% {trend.label}
                     </span>
-                  </td>
-                </tr>
-              ))}
-              {filteredPayments.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-6 py-4 text-center text-sm text-slate-500">
-                    Aucun paiement trouvé pour cette période.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                )}
+            </div>
+            <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">{label}</p>
+            <p className={`text-2xl font-bold ${textCls[accent]}`}>{value}</p>
+            {sub && <p className="text-xs text-slate-500 mt-1">{sub}</p>}
         </div>
-      </div>
-    </div>
-  );
+    );
+};
+
+// ─── Page principale ──────────────────────────────────────────────────────────
+export default function Finance() {
+    const [payments,  setPayments]  = useState<any[]>([]);
+    const [patients,  setPatients]  = useState<Record<string, any>>({});
+    const [loading,   setLoading]   = useState(true);
+    const [period,    setPeriod]    = useState<Period>('month');
+    const [search,    setSearch]    = useState('');
+    const [page,      setPage]      = useState(1);
+    const PAGE_SIZE = 15;
+
+    // Fetch
+    useEffect(() => {
+        const unsubPay = onSnapshot(
+            query(collection(db, 'payments'), orderBy('date_paiement', 'desc')),
+            snap => { setPayments(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+            () => setLoading(false)
+        );
+        const unsubPat = onSnapshot(collection(db, 'patients'), snap => {
+            const map: Record<string, any> = {};
+            snap.docs.forEach(d => { map[d.id] = d.data(); });
+            setPatients(map);
+        });
+        return () => { unsubPay(); unsubPat(); };
+    }, []);
+
+    // Plage de la période courante
+    const { startCur, endCur, startPrev, endPrev } = useMemo(() => {
+        const now = new Date();
+        let sc: Date, ec: Date, sp: Date, ep: Date;
+        if (period === 'day') {
+            sc = new Date(format(now, 'yyyy-MM-dd') + 'T00:00:00');
+            ec = new Date(format(now, 'yyyy-MM-dd') + 'T23:59:59');
+            sp = new Date(format(new Date(now.getTime() - 86400000), 'yyyy-MM-dd') + 'T00:00:00');
+            ep = new Date(format(new Date(now.getTime() - 86400000), 'yyyy-MM-dd') + 'T23:59:59');
+        } else if (period === 'week') {
+            sc = startOfWeek(now, { weekStartsOn: 1 });
+            ec = new Date();
+            sp = startOfWeek(subWeeks(now, 1), { weekStartsOn: 1 });
+            ep = endOfWeek(subWeeks(now, 1), { weekStartsOn: 1 });
+        } else if (period === 'month') {
+            sc = startOfMonth(now);
+            ec = new Date();
+            sp = startOfMonth(subMonths(now, 1));
+            ep = endOfMonth(subMonths(now, 1));
+        } else if (period === 'quarter') {
+            sc = startOfMonth(subMonths(now, 2));
+            ec = new Date();
+            sp = startOfMonth(subMonths(now, 5));
+            ep = endOfMonth(subMonths(now, 3));
+        } else { // year
+            sc = new Date(now.getFullYear(), 0, 1);
+            ec = new Date();
+            sp = new Date(now.getFullYear() - 1, 0, 1);
+            ep = new Date(now.getFullYear() - 1, 11, 31);
+        }
+        return { startCur: sc, endCur: ec, startPrev: sp, endPrev: ep };
+    }, [period]);
+
+    const inRange = (p: any, start: Date, end: Date) => {
+        const d = new Date(p.date_paiement || p.created_at || '');
+        return d >= start && d <= end;
+    };
+
+    const curPay  = useMemo(() => payments.filter(p => inRange(p, startCur, endCur)),  [payments, startCur, endCur]);
+    const prevPay = useMemo(() => payments.filter(p => inRange(p, startPrev, endPrev)), [payments, startPrev, endPrev]);
+
+    // KPIs
+    const kpi = useMemo(() => {
+        const encaisse    = (arr: any[]) => arr.filter(p => PAID_SET.has((p.statut_paiement||'').toLowerCase())).reduce((s,p) => s + (Number(p.montant)||0), 0);
+        const impayeAmt   = (arr: any[]) => arr.filter(p => UNPAID_SET.has((p.statut_paiement||'').toLowerCase())).reduce((s,p) => s + (Number(p.montant)||0), 0);
+        const nbPaid      = (arr: any[]) => arr.filter(p => PAID_SET.has((p.statut_paiement||'').toLowerCase())).length;
+
+        const caCur   = encaisse(curPay);
+        const caPrev  = encaisse(prevPay);
+        const impCur  = impayeAmt(curPay);
+        const nbCur   = nbPaid(curPay);
+        const total   = caCur + impCur;
+        const taux    = total > 0 ? Math.round((caCur / total) * 100) : 0;
+        const panier  = nbCur > 0 ? caCur / nbCur : 0;
+        const trendCA = caPrev > 0 ? Math.round(((caCur - caPrev) / caPrev) * 100) : 0;
+
+        return { caCur, caPrev, impCur, nbCur, taux, panier, trendCA, total };
+    }, [curPay, prevPay]);
+
+    // Top patients par CA
+    const topPatients = useMemo(() => {
+        const map: Record<string, number> = {};
+        curPay.filter(p => PAID_SET.has((p.statut_paiement||'').toLowerCase())).forEach(p => {
+            if (p.patient_id) map[p.patient_id] = (map[p.patient_id] || 0) + (Number(p.montant) || 0);
+        });
+        return Object.entries(map)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([id, ca]) => ({ id, ca, patient: patients[id] }));
+    }, [curPay, patients]);
+
+    // Répartition modes
+    const modeData = useMemo(() => {
+        const map: Record<string, number> = {};
+        curPay.filter(p => PAID_SET.has((p.statut_paiement||'').toLowerCase())).forEach(p => {
+            const m = p.mode_paiement || 'Inconnu';
+            map[m] = (map[m] || 0) + (Number(p.montant) || 0);
+        });
+        return Object.entries(map).map(([name, value]) => ({ name, value }));
+    }, [curPay]);
+
+    // Évolution CA (barres quotidiennes ou mensuelles)
+    const evolutionData = useMemo(() => {
+        const grouped: Record<string, { ca: number; nb: number }> = {};
+        const paid = payments.filter(p => PAID_SET.has((p.statut_paiement||'').toLowerCase()));
+        const useMonth = period === 'year' || period === 'quarter';
+        paid.forEach(p => {
+            const d = new Date(p.date_paiement || p.created_at || '');
+            if (!inRange(p, startCur, endCur) && !inRange(p, startPrev, endPrev)) return;
+            const key = useMonth ? format(d, 'MMM yy', { locale: fr }) : format(d, 'dd/MM');
+            if (!grouped[key]) grouped[key] = { ca: 0, nb: 0 };
+            grouped[key].ca += Number(p.montant) || 0;
+            grouped[key].nb++;
+        });
+        return Object.entries(grouped).map(([date, v]) => ({ date, ...v }));
+    }, [payments, startCur, endCur, startPrev, endPrev, period]);
+
+    // Répartition statuts
+    const statutData = useMemo(() => {
+        const map: Record<string, number> = {};
+        curPay.forEach(p => {
+            const s = p.statut_paiement || 'inconnu';
+            map[s] = (map[s] || 0) + (Number(p.montant) || 0);
+        });
+        return Object.entries(map).map(([name, value]) => ({ name, value }));
+    }, [curPay]);
+
+    // Table filtrée + paginée
+    const tableRows = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        return curPay.filter(p => {
+            if (!q) return true;
+            const pt = patients[p.patient_id];
+            const name = pt ? `${pt.nom} ${pt.prenom}`.toLowerCase() : '';
+            return name.includes(q) || (p.mode_paiement || '').toLowerCase().includes(q)
+                || (p.type_paiement || '').toLowerCase().includes(q);
+        });
+    }, [curPay, patients, search]);
+
+    const totalPages = Math.ceil(tableRows.length / PAGE_SIZE);
+    const paginated  = tableRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+    if (loading) return <div className="text-center py-20 text-slate-400">Chargement…</div>;
+
+    const STAT_COLORS: Record<string, string> = {
+        'payé': 'bg-emerald-100 text-emerald-800', 'réglé': 'bg-emerald-100 text-emerald-800',
+        'non payé': 'bg-rose-100 text-rose-800', 'en_attente': 'bg-amber-100 text-amber-800',
+        'en attente': 'bg-amber-100 text-amber-800', 'partiel': 'bg-sky-100 text-sky-800',
+    };
+
+    return (
+        <div className="space-y-7 pb-12">
+
+            {/* ── Header ─────────────────────────────────────────── */}
+            <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-900">Finance</h1>
+                    <p className="text-sm text-slate-500 mt-0.5 capitalize">
+                        {period === 'month'
+                            ? format(new Date(), 'MMMM yyyy', { locale: fr })
+                            : PERIOD_LABELS[period]}
+                    </p>
+                </div>
+                {/* Chips de période */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                    {(Object.keys(PERIOD_LABELS) as Period[]).map(p => (
+                        <button
+                            key={p}
+                            onClick={() => { setPeriod(p); setPage(1); }}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                                period === p
+                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                    : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-700'
+                            }`}
+                        >
+                            {PERIOD_LABELS[p]}
+                        </button>
+                    ))}
+                    <Link
+                        to="/payments"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100"
+                    >
+                        Gérer les paiements <ChevronRight className="w-3 h-3" />
+                    </Link>
+                </div>
+            </div>
+
+            {/* ── KPIs ───────────────────────────────────────────── */}
+            <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
+                <FinKpi
+                    label="CA encaissé"
+                    value={fmtMAD(kpi.caCur)}
+                    sub={kpi.caPrev > 0 ? `Période préc. : ${fmtMAD(kpi.caPrev)}` : undefined}
+                    icon={<DollarSign className="w-5 h-5" />}
+                    accent="emerald"
+                    trend={kpi.caPrev > 0 ? { value: kpi.trendCA, label: 'vs préc.' } : undefined}
+                />
+                <FinKpi
+                    label="Impayés"
+                    value={fmtMAD(kpi.impCur)}
+                    sub={kpi.total > 0 ? `${100 - kpi.taux}% du total` : undefined}
+                    icon={<AlertCircle className="w-5 h-5" />}
+                    accent={kpi.impCur > 0 ? 'rose' : 'emerald'}
+                />
+                <FinKpi
+                    label="Taux de recouvrement"
+                    value={`${kpi.taux} %`}
+                    sub={`${kpi.nbCur} paiement${kpi.nbCur > 1 ? 's' : ''} encaissé${kpi.nbCur > 1 ? 's' : ''}`}
+                    icon={<CheckCircle className="w-5 h-5" />}
+                    accent={kpi.taux >= 80 ? 'emerald' : kpi.taux >= 60 ? 'amber' : 'rose'}
+                />
+                <FinKpi
+                    label="Panier moyen"
+                    value={fmtMAD(kpi.panier)}
+                    sub="Par consultation encaissée"
+                    icon={<CreditCard className="w-5 h-5" />}
+                    accent="indigo"
+                />
+                <FinKpi
+                    label="Transactions"
+                    value={String(curPay.length)}
+                    sub={`Dont ${kpi.nbCur} réglées`}
+                    icon={<BarChart2 className="w-5 h-5" />}
+                    accent="sky"
+                />
+            </div>
+
+            {/* ── Graphiques : évolution + modes + statuts ───────── */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+                {/* Évolution CA */}
+                <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-sm font-semibold text-slate-800 uppercase tracking-wide">Évolution du CA</h2>
+                        <span className="text-xs text-slate-400">{PERIOD_LABELS[period]}</span>
+                    </div>
+                    {evolutionData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={220}>
+                            <AreaChart data={evolutionData} margin={{ top: 5, right: 10, bottom: 0, left: 0 }}>
+                                <defs>
+                                    <linearGradient id="gradCA" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%"  stopColor="#4f46e5" stopOpacity={0.15} />
+                                        <stop offset="95%" stopColor="#4f46e5" stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                                <Tooltip content={<CustomTooltip />} />
+                                <Area type="monotone" dataKey="ca" name="CA" stroke="#4f46e5" strokeWidth={2} fill="url(#gradCA)" dot={false} activeDot={{ r: 4 }} />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    ) : (
+                        <div className="h-[220px] flex items-center justify-center text-sm text-slate-400">
+                            Aucune donnée pour cette période.
+                        </div>
+                    )}
+                </div>
+
+                {/* Donut modes de paiement */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                    <h2 className="text-sm font-semibold text-slate-800 uppercase tracking-wide mb-4">Modes de paiement</h2>
+                    {modeData.length > 0 ? (
+                        <>
+                            <ResponsiveContainer width="100%" height={160}>
+                                <PieChart>
+                                    <Pie data={modeData} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="value">
+                                        {modeData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                                    </Pie>
+                                    <Tooltip formatter={(v: number) => fmtMAD(v)} contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,.1)', fontSize: 12 }} />
+                                </PieChart>
+                            </ResponsiveContainer>
+                            <div className="mt-2 space-y-1.5">
+                                {modeData.map((d, i) => (
+                                    <div key={d.name} className="flex items-center justify-between text-xs">
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                                            <span className="text-slate-600 capitalize">{d.name}</span>
+                                        </div>
+                                        <span className="font-semibold text-slate-800">{fmtMAD(d.value)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
+                    ) : (
+                        <div className="h-[180px] flex items-center justify-center text-sm text-slate-400">Aucune donnée.</div>
+                    )}
+                </div>
+            </div>
+
+            {/* ── Top patients + statuts ─────────────────────────── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+                {/* Top 5 patients par CA */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                    <h2 className="text-sm font-semibold text-slate-800 uppercase tracking-wide mb-4 flex items-center gap-2">
+                        <Users className="w-4 h-4 text-indigo-500" />
+                        Top 5 patients — CA encaissé
+                    </h2>
+                    {topPatients.length === 0 ? (
+                        <p className="text-sm text-slate-400 text-center py-6">Aucune donnée</p>
+                    ) : (
+                        <ul className="space-y-3">
+                            {topPatients.map(({ id, ca, patient }, idx) => {
+                                const maxCA = topPatients[0]?.ca || 1;
+                                return (
+                                    <li key={id} className="flex items-center gap-3">
+                                        <span className="text-xs font-bold text-slate-400 w-4 flex-shrink-0">{idx + 1}</span>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex justify-between mb-1">
+                                                <Link to={`/patients/${id}`} className="text-sm font-medium text-slate-900 hover:text-indigo-700 truncate">
+                                                    {patient ? `${patient.nom} ${patient.prenom}` : 'Patient inconnu'}
+                                                </Link>
+                                                <span className="text-sm font-bold text-emerald-700 flex-shrink-0 ml-2">{fmtMAD(ca)}</span>
+                                            </div>
+                                            <div className="w-full bg-slate-100 rounded-full h-1.5">
+                                                <div
+                                                    className="bg-indigo-500 h-1.5 rounded-full transition-all"
+                                                    style={{ width: `${Math.round((ca / maxCA) * 100)}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    )}
+                </div>
+
+                {/* Répartition statuts */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                    <h2 className="text-sm font-semibold text-slate-800 uppercase tracking-wide mb-4 flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4 text-emerald-500" />
+                        Répartition par statut
+                    </h2>
+                    {statutData.length === 0 ? (
+                        <p className="text-sm text-slate-400 text-center py-6">Aucune donnée</p>
+                    ) : (
+                        <ResponsiveContainer width="100%" height={200}>
+                            <BarChart data={statutData} layout="vertical" margin={{ left: 10, right: 20 }}>
+                                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                                <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} width={80} />
+                                <Tooltip content={<CustomTooltip />} />
+                                <Bar dataKey="value" name="Montant" radius={[0, 6, 6, 0]} maxBarSize={24}>
+                                    {statutData.map((_, i) => (
+                                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                                    ))}
+                                </Bar>
+                            </BarChart>
+                        </ResponsiveContainer>
+                    )}
+                </div>
+            </div>
+
+            {/* ── Table des transactions ──────────────────────────── */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="text-sm font-semibold text-slate-800 uppercase tracking-wide">
+                        Transactions — {tableRows.length} paiement{tableRows.length > 1 ? 's' : ''}
+                    </h2>
+                    {/* Recherche */}
+                    <div className="relative w-64">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                        <input
+                            type="text"
+                            value={search}
+                            onChange={e => { setSearch(e.target.value); setPage(1); }}
+                            placeholder="Rechercher patient, mode…"
+                            className="w-full pl-9 pr-8 py-2 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        {search && (
+                            <button onClick={() => { setSearch(''); setPage(1); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                <X className="w-3.5 h-3.5" />
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                    <table className="min-w-full">
+                        <thead>
+                            <tr className="bg-slate-50 border-b border-slate-200">
+                                <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
+                                <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Patient</th>
+                                <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
+                                <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Mode</th>
+                                <th className="px-5 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Montant</th>
+                                <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Statut</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {paginated.map(p => {
+                                const pt = patients[p.patient_id];
+                                const isPaid = PAID_SET.has((p.statut_paiement||'').toLowerCase());
+                                const statCls = STAT_COLORS[p.statut_paiement] || 'bg-slate-100 text-slate-700';
+                                return (
+                                    <tr key={p.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-5 py-3.5 text-sm text-slate-600 whitespace-nowrap">
+                                            {p.date_paiement ? new Date(p.date_paiement).toLocaleDateString('fr-FR') : '—'}
+                                        </td>
+                                        <td className="px-5 py-3.5 text-sm font-medium">
+                                            {pt ? (
+                                                <Link to={`/patients/${p.patient_id}`} className="text-indigo-700 hover:underline">
+                                                    {pt.nom} {pt.prenom}
+                                                </Link>
+                                            ) : (
+                                                <span className="text-slate-400">—</span>
+                                            )}
+                                        </td>
+                                        <td className="px-5 py-3.5 text-sm text-slate-600 capitalize">
+                                            {p.type_paiement || 'Consultation'}
+                                        </td>
+                                        <td className="px-5 py-3.5 text-sm text-slate-600 capitalize">
+                                            {p.mode_paiement || '—'}
+                                        </td>
+                                        <td className={`px-5 py-3.5 text-sm font-bold text-right whitespace-nowrap ${isPaid ? 'text-emerald-700' : 'text-rose-600'}`}>
+                                            {fmtMAD(Number(p.montant) || 0)}
+                                        </td>
+                                        <td className="px-5 py-3.5">
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${statCls}`}>
+                                                {p.statut_paiement || '—'}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                            {paginated.length === 0 && (
+                                <tr>
+                                    <td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">
+                                        Aucun paiement trouvé.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                    <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-between text-sm">
+                        <span className="text-slate-500">
+                            Page {page} / {totalPages} · {tableRows.length} transactions
+                        </span>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setPage(p => Math.max(1, p - 1))}
+                                disabled={page === 1}
+                                className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
+                            >
+                                ← Préc.
+                            </button>
+                            <button
+                                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                disabled={page === totalPages}
+                                className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
+                            >
+                                Suiv. →
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
 }
