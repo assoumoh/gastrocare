@@ -1,15 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Calendar, Users, Activity, AlertCircle, FileText, Pill,
   Clock, CheckCircle, UserPlus, FileSignature, Files, ChevronRight, User, Stethoscope, ClipboardList,
-  PlayCircle, ArrowRight
+  PlayCircle, ArrowRight, Wallet, FlaskConical, TrendingUp
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import type { FileAttenteEntry } from '../types';
+import KpiCard from '../components/dashboard/KpiCard';
 
 export default function Dashboard() {
   const { appUser } = useAuth();
@@ -23,6 +24,11 @@ export default function Dashboard() {
   const [patientsMap, setPatientsMap] = useState<Record<string, any>>({});
   const [patientStats, setPatientStats] = useState({ total: 0, nouveaux: 0, habituels: 0 });
   const [fileAttente, setFileAttente] = useState<FileAttenteEntry[]>([]);
+  // Pour KPIs (30 derniers jours)
+  const [consultations30, setConsultations30] = useState<any[]>([]);
+  const [payments30, setPayments30]           = useState<any[]>([]);
+  const [examsAll, setExamsAll]               = useState<any[]>([]);
+  const [allPayments, setAllPayments]         = useState<any[]>([]);
 
   useEffect(() => {
     if (!appUser) return;
@@ -95,9 +101,36 @@ export default function Dashboard() {
       (snapshot) => { setDocuments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); }
     );
 
+    // Consultations des 30 derniers jours (pour sparklines + KPIs)
+    const d30 = new Date();
+    d30.setDate(d30.getDate() - 30);
+    const d30Str = d30.toISOString().split('T')[0];
+    const unsubCons30 = onSnapshot(
+      query(collection(db, 'consultations'), where('date_consultation', '>=', d30Str)),
+      (snap) => setConsultations30(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      () => {} // ignore erreurs index
+    );
+
+    // Paiements (tous, pour impayés + agrégats)
+    const unsubPayAll = onSnapshot(
+      query(collection(db, 'payments')),
+      (snap) => {
+        const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        setAllPayments(all);
+        setPayments30(all.filter(p => (p.date_paiement || p.date || '') >= d30Str));
+      }
+    );
+
+    // Examens (tous) pour KPI "à relire"
+    const unsubExAll = onSnapshot(
+      query(collection(db, 'exams')),
+      (snap) => setExamsAll(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+
     return () => {
       unsubRecentPatients(); unsubAllPatients(); unsubAppointments(); unsubConsultations();
       unsubFileAttente(); unsubExams(); unsubPrescriptions(); unsubDocuments();
+      unsubCons30(); unsubPayAll(); unsubExAll();
     };
   }, [appUser]);
 
@@ -135,6 +168,77 @@ export default function Dashboard() {
   };
 
   const prescriptionsToday = prescriptions.filter(p => p.date_prescription === todayStr);
+
+  // ────────────────────────────────────────────────────────────────
+  // KPIs du jour + sparklines 7j
+  // ────────────────────────────────────────────────────────────────
+  const kpis = useMemo(() => {
+    // 7 derniers jours (J-6 … J)
+    const daysISO: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      daysISO.push(d.toISOString().split('T')[0]);
+    }
+    const paidStatuts = new Set(['payé', 'paye', 'réglé', 'regle', 'regle_partiel', 'réglé_partiel']);
+
+    // Consultations terminées par jour
+    const consParDate: Record<string, number> = {};
+    let consVuesAuj = 0;
+    for (const c of consultations30) {
+      const d = c.date_consultation;
+      if (!d) continue;
+      const isTerm = c.statutConsultation === 'terminee';
+      if (!isTerm) continue;
+      consParDate[d] = (consParDate[d] || 0) + 1;
+      if (d === todayStr) consVuesAuj++;
+    }
+    const seriesPatients = daysISO.map(d => consParDate[d] || 0);
+    const moyPatients7   = seriesPatients.slice(0, -1).reduce((a, b) => a + b, 0) / 6 || 0;
+
+    // CA par jour (payments réglés)
+    const caParDate: Record<string, number> = {};
+    let caAuj   = 0;
+    for (const p of payments30) {
+      if (!paidStatuts.has((p.statut_paiement || '').toLowerCase())) continue;
+      const d = p.date_paiement || p.date;
+      if (!d) continue;
+      const m = Number(p.montant) || 0;
+      caParDate[d] = (caParDate[d] || 0) + m;
+      if (d === todayStr) caAuj += m;
+    }
+    const seriesCA = daysISO.map(d => caParDate[d] || 0);
+    const moyCA7   = seriesCA.slice(0, -1).reduce((a, b) => a + b, 0) / 6 || 0;
+
+    // Impayés (tous statuts)
+    const impayes = allPayments.filter(p => {
+      const s = (p.statut_paiement || '').toLowerCase();
+      return s && !paidStatuts.has(s);
+    });
+    const impayesMontant = impayes.reduce((sum, p) => sum + (Number(p.montant) || 0), 0);
+
+    // Examens à relire (apportés ou en attente de résultat)
+    const examsALire = examsAll.filter(e => {
+      const s = e.statut || e.statutExamen || '';
+      return s === 'apporte' || s === 'en_attente_resultat';
+    });
+
+    return {
+      consVuesAuj,
+      seriesPatients,
+      moyPatients7,
+      caAuj,
+      seriesCA,
+      moyCA7,
+      impayesCount: impayes.length,
+      impayesMontant,
+      examsALireCount: examsALire.length,
+      examsDemandeCount: examsAll.filter(e => (e.statut || e.statutExamen) === 'demandé').length,
+    };
+  }, [consultations30, payments30, allPayments, examsAll, todayStr]);
+
+  const formatMAD = (n: number) =>
+    new Intl.NumberFormat('fr-MA', { maximumFractionDigits: 0 }).format(n) + ' MAD';
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -276,6 +380,61 @@ export default function Dashboard() {
               )}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+      {/* KPIs du jour — sparklines 7j + comparatif vs moyenne              */}
+      {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+      <div>
+        <div className="flex items-end justify-between mb-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Indicateurs clés</h2>
+            <p className="text-xs text-slate-500">Aujourd'hui · tendance sur 7 jours</p>
+          </div>
+          <Link to="/stats" className="text-xs text-indigo-600 hover:text-indigo-900 font-medium hidden sm:inline-flex items-center">
+            Statistiques détaillées <ChevronRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <KpiCard
+            label="Patients vus aujourd'hui"
+            value={kpis.consVuesAuj}
+            icon={<Users className="w-4 h-4" />}
+            accent="indigo"
+            series={kpis.seriesPatients}
+            comparison={{ current: kpis.consVuesAuj, reference: kpis.moyPatients7 }}
+            subtitle={kpis.moyPatients7 > 0 ? `Moy. 7j : ${kpis.moyPatients7.toFixed(1)} / jour` : 'Aucun historique 7j'}
+          />
+          <KpiCard
+            label="CA encaissé aujourd'hui"
+            value={formatMAD(kpis.caAuj)}
+            icon={<Wallet className="w-4 h-4" />}
+            accent="emerald"
+            series={kpis.seriesCA}
+            comparison={{ current: kpis.caAuj, reference: kpis.moyCA7 }}
+            subtitle={kpis.moyCA7 > 0 ? `Moy. 7j : ${formatMAD(kpis.moyCA7)}` : 'Aucun encaissement 7j'}
+          />
+          <KpiCard
+            label="Impayés en cours"
+            value={kpis.impayesCount}
+            icon={<AlertCircle className="w-4 h-4" />}
+            accent={kpis.impayesCount > 0 ? 'rose' : 'emerald'}
+            subtitle={kpis.impayesMontant > 0 ? `${formatMAD(kpis.impayesMontant)} à recouvrer` : 'Aucun impayé 🎉'}
+            subtitleColor={kpis.impayesCount > 0 ? 'red' : 'emerald'}
+          />
+          <KpiCard
+            label="Examens à traiter"
+            value={kpis.examsALireCount}
+            icon={<FlaskConical className="w-4 h-4" />}
+            accent="amber"
+            subtitle={
+              kpis.examsDemandeCount > 0
+                ? `+ ${kpis.examsDemandeCount} demandé${kpis.examsDemandeCount > 1 ? 's' : ''} en attente`
+                : 'Aucune demande en attente'
+            }
+            subtitleColor={kpis.examsALireCount > 0 ? 'amber' : 'slate'}
+          />
         </div>
       </div>
 
