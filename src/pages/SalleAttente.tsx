@@ -9,8 +9,9 @@ import {
     doc,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { format } from 'date-fns';
+import { format, isToday } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import DateNavigator from '../components/shared/DateNavigator';
 import { useNavigate } from 'react-router-dom';
 import {
     Users,
@@ -74,7 +75,10 @@ const SalleAttente: React.FC = () => {
     const [workflowStep, setWorkflowStep] = useState<'idle' | 'exams' | 'prescription' | 'checklist'>('idle');
     const [workflowData, setWorkflowData] = useState<any>(null);
 
-    const today = format(new Date(), 'yyyy-MM-dd');
+    const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+    const today    = format(new Date(), 'yyyy-MM-dd');
+    const dateStr  = format(selectedDate, 'yyyy-MM-dd');
+    const isCurrentDay = isToday(selectedDate);
 
     // Timer refresh
     useEffect(() => {
@@ -82,11 +86,11 @@ const SalleAttente: React.FC = () => {
         return () => clearInterval(interval);
     }, []);
 
-    // Listener file_attente
+    // Listener file_attente (suit la date sélectionnée)
     useEffect(() => {
         const q = query(
             collection(db, 'file_attente'),
-            where('date', '==', today)
+            where('date', '==', dateStr)
         );
         const unsub = onSnapshot(q, (snap) => {
             const list = snap.docs
@@ -95,7 +99,7 @@ const SalleAttente: React.FC = () => {
             setEntries(list);
         });
         return unsub;
-    }, [today]);
+    }, [dateStr]);
 
     // Listener patients
     useEffect(() => {
@@ -109,11 +113,11 @@ const SalleAttente: React.FC = () => {
         return unsub;
     }, []);
 
-    // Listener appointments (date_rdv)
+    // Listener appointments (suit la date sélectionnée)
     useEffect(() => {
         const q = query(
             collection(db, 'appointments'),
-            where('date_rdv', '==', today)
+            where('date_rdv', '==', dateStr)
         );
         const unsub = onSnapshot(q, (snap) => {
             const list = snap.docs
@@ -122,7 +126,7 @@ const SalleAttente: React.FC = () => {
             setTodayAppointments(list);
         });
         return unsub;
-    }, [today]);
+    }, [dateStr]);
 
     // Calculs dérivés
     const appointmentIdsInQueue = useMemo(() => {
@@ -311,7 +315,7 @@ const SalleAttente: React.FC = () => {
             await addDoc(collection(db, 'file_attente'), {
                 patient_id: appointment.patient_id,
                 appointment_id: appointment.id,
-                date: today,
+                date: dateStr,
                 heure_arrivee: new Date().toISOString(),
                 statut: 'en_attente',
                 priorite: 'normale',
@@ -337,7 +341,7 @@ const SalleAttente: React.FC = () => {
             const maxOrdre = entries.reduce((max: number, e: any) => Math.max(max, e.ordre || 0), 0);
             await addDoc(collection(db, 'file_attente'), {
                 patient_id: walkInPatientId,
-                date: today,
+                date: dateStr,
                 heure_arrivee: new Date().toISOString(),
                 statut: 'en_attente',
                 priorite: 'normale',
@@ -366,21 +370,39 @@ const SalleAttente: React.FC = () => {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Salle d'attente</h1>
-                    <p className="text-sm text-gray-500 mt-1">
-                        {format(new Date(), 'EEEE d MMMM yyyy', { locale: fr })}
+                    <p className="text-sm text-gray-500 mt-0.5">
+                        {format(selectedDate, 'EEEE d MMMM yyyy', { locale: fr })}
                     </p>
                 </div>
-                <button
-                    onClick={() => setShowAddWalkIn(true)}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700"
-                >
-                    <UserPlus className="w-4 h-4" />
-                    Sans rendez-vous
-                </button>
+                {isCurrentDay && (
+                    <button
+                        onClick={() => setShowAddWalkIn(true)}
+                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700"
+                    >
+                        <UserPlus className="w-4 h-4" />
+                        Sans rendez-vous
+                    </button>
+                )}
             </div>
+
+            {/* Navigation par date */}
+            <DateNavigator
+                selectedDate={selectedDate}
+                onDateChange={setSelectedDate}
+                counts={Object.fromEntries(
+                    Object.entries(
+                        [...entries, ...todayAppointments].reduce((acc: Record<string,number>, e: any) => {
+                            const d = e.date || e.date_rdv;
+                            if (d) acc[d] = (acc[d] || 0) + 1;
+                            return acc;
+                        }, {})
+                    )
+                )}
+                showReadonlyBanner={true}
+            />
 
             {/* Erreur */}
             {error && (

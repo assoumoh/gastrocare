@@ -25,10 +25,12 @@ export default function Dashboard() {
   const [patientStats, setPatientStats] = useState({ total: 0, nouveaux: 0, habituels: 0 });
   const [fileAttente, setFileAttente] = useState<FileAttenteEntry[]>([]);
   // Pour KPIs (30 derniers jours)
-  const [consultations30, setConsultations30] = useState<any[]>([]);
-  const [payments30, setPayments30]           = useState<any[]>([]);
-  const [examsAll, setExamsAll]               = useState<any[]>([]);
-  const [allPayments, setAllPayments]         = useState<any[]>([]);
+  const [consultations30, setConsultations30]   = useState<any[]>([]);
+  const [payments30, setPayments30]             = useState<any[]>([]);
+  const [examsAll, setExamsAll]                 = useState<any[]>([]);
+  const [allPayments, setAllPayments]           = useState<any[]>([]);
+  const [tomorrowAppts, setTomorrowAppts]       = useState<any[]>([]);
+  const [allConsultations, setAllConsultations] = useState<any[]>([]);
 
   useEffect(() => {
     if (!appUser) return;
@@ -127,10 +129,26 @@ export default function Dashboard() {
       (snap) => setExamsAll(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     );
 
+    // RDV de demain (alertes L3)
+    const tomorrowDate = new Date();
+    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    const tomorrowStr = tomorrowDate.toISOString().split('T')[0];
+    const unsubTomorrow = onSnapshot(
+      query(collection(db, 'appointments'), where('date_rdv', '==', tomorrowStr)),
+      (snap) => setTomorrowAppts(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+
+    // Toutes les consultations (pour alertes sans CR)
+    const unsubAllCons = onSnapshot(
+      query(collection(db, 'consultations'), where('statutConsultation', '==', 'terminee')),
+      (snap) => setAllConsultations(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      () => {}
+    );
+
     return () => {
       unsubRecentPatients(); unsubAllPatients(); unsubAppointments(); unsubConsultations();
       unsubFileAttente(); unsubExams(); unsubPrescriptions(); unsubDocuments();
-      unsubCons30(); unsubPayAll(); unsubExAll();
+      unsubCons30(); unsubPayAll(); unsubExAll(); unsubTomorrow(); unsubAllCons();
     };
   }, [appUser]);
 
@@ -239,6 +257,91 @@ export default function Dashboard() {
 
   const formatMAD = (n: number) =>
     new Intl.NumberFormat('fr-MA', { maximumFractionDigits: 0 }).format(n) + ' MAD';
+
+  // ────────────────────────────────────────────────────────────────
+  // L3 — Alertes actionnables
+  // ────────────────────────────────────────────────────────────────
+  const alerts = useMemo(() => {
+    const paidStatuts = new Set(['payé', 'paye', 'réglé', 'regle']);
+
+    // 🔴 Urgent — consultations terminées sans diagnostic
+    const sansCR = allConsultations
+      .filter(c => !c.diagnostic_principal || c.diagnostic_principal.trim() === '')
+      .slice(0, 5)
+      .map(c => ({
+        id: c.id,
+        label: (patientsMap[c.patient_id] ? `${patientsMap[c.patient_id].nom} ${patientsMap[c.patient_id].prenom}` : 'Patient'),
+        sub:   `Consultation du ${new Date(c.date_consultation + 'T12:00:00').toLocaleDateString('fr-FR')} — sans diagnostic`,
+        href:  `/patients/${c.patient_id}?tab=consultations`,
+        icon:  'stethoscope',
+      }));
+
+    // 🔴 Urgent — examens demandés > 15j sans résultat
+    const examsRetard = examsAll
+      .filter(e => {
+        const s = e.statut || e.statutExamen || '';
+        if (s !== 'demandé') return false;
+        const d = e.date_demande || e.date_examen;
+        if (!d) return false;
+        return (Date.now() - new Date(d).getTime()) > 15 * 86400000;
+      })
+      .slice(0, 5)
+      .map(e => ({
+        id:   e.id,
+        label: e.nom_examen || e.type_examen,
+        sub:  `${patientsMap[e.patient_id] ? patientsMap[e.patient_id].nom + ' ' + patientsMap[e.patient_id].prenom : 'Patient'} — demandé il y a ${Math.floor((Date.now() - new Date(e.date_demande || e.date_examen).getTime()) / 86400000)}j`,
+        href: `/patients/${e.patient_id}?tab=exams`,
+        icon: 'flask',
+      }));
+
+    // 🔴 Urgent — impayés > 30j
+    const impayes30j = allPayments
+      .filter(p => {
+        const s = (p.statut_paiement || '').toLowerCase();
+        if (!s || paidStatuts.has(s)) return false;
+        const d = p.date_paiement || p.date || p.created_at;
+        if (!d) return false;
+        return (Date.now() - new Date(d).getTime()) > 30 * 86400000;
+      })
+      .slice(0, 5)
+      .map(p => ({
+        id:    p.id,
+        label: `${formatMAD(Number(p.montant) || 0)} — ${patientsMap[p.patient_id] ? patientsMap[p.patient_id].nom + ' ' + patientsMap[p.patient_id].prenom : 'Patient'}`,
+        sub:   `Impayé depuis > 30 jours`,
+        href:  `/payments`,
+        icon:  'wallet',
+      }));
+
+    // 🟡 Suivi — résultats d'examens apportés à lire
+    const resultatsALire = examsAll
+      .filter(e => (e.statut || e.statutExamen) === 'apporte')
+      .slice(0, 5)
+      .map(e => ({
+        id:    e.id,
+        label: e.nom_examen || e.type_examen,
+        sub:   patientsMap[e.patient_id] ? `${patientsMap[e.patient_id].nom} ${patientsMap[e.patient_id].prenom}` : 'Patient',
+        href:  `/patients/${e.patient_id}?tab=exams`,
+        icon:  'flask',
+      }));
+
+    // 🔵 RDV demain non confirmés
+    const rdvDemainNonConf = tomorrowAppts
+      .filter(a => !['confirmé', 'confirme', 'en_salle'].includes(a.statut || ''))
+      .slice(0, 5)
+      .map(a => ({
+        id:    a.id,
+        label: patientsMap[a.patient_id] ? `${patientsMap[a.patient_id].nom} ${patientsMap[a.patient_id].prenom}` : 'Patient',
+        sub:   `Demain ${a.heure_rdv ? 'à ' + a.heure_rdv : ''} — ${a.motif || 'sans motif'}`,
+        href:  `/appointments`,
+        icon:  'calendar',
+      }));
+
+    return { sansCR, examsRetard, impayes30j, resultatsALire, rdvDemainNonConf };
+  }, [allConsultations, examsAll, allPayments, tomorrowAppts, patientsMap]);
+
+  const totalUrgent = alerts.sansCR.length + alerts.examsRetard.length + alerts.impayes30j.length;
+  const totalSuivi  = alerts.resultatsALire.length;
+  const totalRdv    = alerts.rdvDemainNonConf.length;
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -437,6 +540,122 @@ export default function Dashboard() {
           />
         </div>
       </div>
+
+      {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+      {/* L3 — Alertes actionnables                                        */}
+      {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+      {(totalUrgent > 0 || totalSuivi > 0 || totalRdv > 0) && (
+        <div>
+          <div className="flex items-end justify-between mb-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Actions requises</h2>
+              <p className="text-xs text-slate-500">{totalUrgent + totalSuivi + totalRdv} point{(totalUrgent + totalSuivi + totalRdv) > 1 ? 's' : ''} à traiter</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+            {/* 🔴 Urgent */}
+            {totalUrgent > 0 && (
+              <div className="bg-white rounded-xl border-l-4 border-rose-500 border border-rose-100 shadow-sm overflow-hidden">
+                <div className="px-4 py-3 bg-rose-50 border-b border-rose-100 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600" />
+                  <h3 className="text-sm font-semibold text-rose-800">Urgent</h3>
+                  <span className="ml-auto bg-rose-500 text-white text-xs font-bold rounded-full px-2 py-0.5">{totalUrgent}</span>
+                </div>
+                <ul className="divide-y divide-slate-100">
+                  {alerts.sansCR.map(a => (
+                    <li key={a.id}>
+                      <Link to={a.href} className="flex items-start gap-3 px-4 py-3 hover:bg-rose-50 transition-colors group">
+                        <Stethoscope className="w-4 h-4 text-rose-400 mt-0.5 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-900 truncate group-hover:text-rose-700">{a.label}</p>
+                          <p className="text-xs text-slate-500 truncate">{a.sub}</p>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-slate-300 mt-0.5 flex-shrink-0 ml-auto" />
+                      </Link>
+                    </li>
+                  ))}
+                  {alerts.examsRetard.map(a => (
+                    <li key={a.id}>
+                      <Link to={a.href} className="flex items-start gap-3 px-4 py-3 hover:bg-rose-50 transition-colors group">
+                        <Activity className="w-4 h-4 text-rose-400 mt-0.5 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-900 truncate group-hover:text-rose-700">{a.label}</p>
+                          <p className="text-xs text-slate-500 truncate">{a.sub}</p>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-slate-300 mt-0.5 flex-shrink-0 ml-auto" />
+                      </Link>
+                    </li>
+                  ))}
+                  {alerts.impayes30j.map(a => (
+                    <li key={a.id}>
+                      <Link to={a.href} className="flex items-start gap-3 px-4 py-3 hover:bg-rose-50 transition-colors group">
+                        <FileText className="w-4 h-4 text-rose-400 mt-0.5 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-900 truncate group-hover:text-rose-700">{a.label}</p>
+                          <p className="text-xs text-slate-500 truncate">{a.sub}</p>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-slate-300 mt-0.5 flex-shrink-0 ml-auto" />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* 🟡 Suivi patient */}
+            {totalSuivi > 0 && (
+              <div className="bg-white rounded-xl border-l-4 border-amber-400 border border-amber-100 shadow-sm overflow-hidden">
+                <div className="px-4 py-3 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-amber-600" />
+                  <h3 className="text-sm font-semibold text-amber-800">Suivi patient</h3>
+                  <span className="ml-auto bg-amber-500 text-white text-xs font-bold rounded-full px-2 py-0.5">{totalSuivi}</span>
+                </div>
+                <ul className="divide-y divide-slate-100">
+                  {alerts.resultatsALire.map(a => (
+                    <li key={a.id}>
+                      <Link to={a.href} className="flex items-start gap-3 px-4 py-3 hover:bg-amber-50 transition-colors group">
+                        <FileText className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-900 truncate group-hover:text-amber-700">{a.label}</p>
+                          <p className="text-xs text-slate-500 truncate">{a.sub}</p>
+                        </div>
+                        <span className="flex-shrink-0 ml-auto px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded-full">À lire</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* 🔵 RDV & relances */}
+            {totalRdv > 0 && (
+              <div className="bg-white rounded-xl border-l-4 border-sky-400 border border-sky-100 shadow-sm overflow-hidden">
+                <div className="px-4 py-3 bg-sky-50 border-b border-sky-100 flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-sky-600" />
+                  <h3 className="text-sm font-semibold text-sky-800">RDV demain</h3>
+                  <span className="ml-auto bg-sky-500 text-white text-xs font-bold rounded-full px-2 py-0.5">{totalRdv}</span>
+                </div>
+                <ul className="divide-y divide-slate-100">
+                  {alerts.rdvDemainNonConf.map(a => (
+                    <li key={a.id}>
+                      <Link to={a.href} className="flex items-start gap-3 px-4 py-3 hover:bg-sky-50 transition-colors group">
+                        <User className="w-4 h-4 text-sky-400 mt-0.5 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-900 truncate group-hover:text-sky-700">{a.label}</p>
+                          <p className="text-xs text-slate-500 truncate">{a.sub}</p>
+                        </div>
+                        <span className="flex-shrink-0 ml-auto px-2 py-0.5 bg-sky-100 text-sky-700 text-xs font-semibold rounded-full">Non confirmé</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Salle d'attente mini */}

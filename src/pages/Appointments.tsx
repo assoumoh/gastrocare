@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, onSnapshot, orderBy, where, addDoc, updateDoc, doc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Plus, Calendar as CalendarIcon, Clock, User, ChevronLeft, ChevronRight, LogIn, AlertTriangle } from 'lucide-react';
 import AppointmentForm from '../components/appointments/AppointmentForm';
 import clsx from 'clsx';
-import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, addDays, addWeeks, addMonths, subDays, subWeeks, subMonths, isSameDay } from 'date-fns';
+import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, addDays, addWeeks, addMonths, subDays, subWeeks, subMonths, isSameDay, startOfWeek as sowFn, addDays as addDaysFn } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import DateNavigator from '../components/shared/DateNavigator';
 
 type ViewMode = 'day' | 'week' | 'month';
 
@@ -215,6 +216,15 @@ export default function Appointments() {
     return acc;
   }, {} as Record<string, any[]>);
 
+  // Comptage par date pour DateNavigator (toute la semaine visible)
+  const appointmentCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    appointments.forEach(a => {
+      if (a.date_rdv) counts[a.date_rdv] = (counts[a.date_rdv] || 0) + 1;
+    });
+    return counts;
+  }, [appointments]);
+
   // Composant de rendu d'un RDV
   const renderAppointmentRow = (apt: any, compact: boolean = false) => {
     const patient = patients[apt.patient_id];
@@ -280,50 +290,47 @@ export default function Appointments() {
 
   return (
     <div className="space-y-6">
-      <div className="sm:flex sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900 capitalize">Agenda - {getTitle()}</h1>
-        <div className="mt-4 sm:mt-0 flex space-x-3">
-          <div className="flex rounded-md shadow-sm">
-            <button
-              onClick={() => setViewMode('day')}
-              className={clsx(
-                "px-4 py-2 text-sm font-medium border border-slate-300 rounded-l-md",
-                viewMode === 'day' ? "bg-indigo-50 text-indigo-600 z-10" : "bg-white text-slate-700 hover:bg-slate-50"
-              )}
-            >
-              Jour
-            </button>
-            <button
-              onClick={() => setViewMode('week')}
-              className={clsx(
-                "px-4 py-2 text-sm font-medium border-t border-b border-r border-slate-300",
-                viewMode === 'week' ? "bg-indigo-50 text-indigo-600 z-10" : "bg-white text-slate-700 hover:bg-slate-50"
-              )}
-            >
-              Semaine
-            </button>
-            <button
-              onClick={() => setViewMode('month')}
-              className={clsx(
-                "px-4 py-2 text-sm font-medium border-t border-b border-r border-slate-300 rounded-r-md",
-                viewMode === 'month' ? "bg-indigo-50 text-indigo-600 z-10" : "bg-white text-slate-700 hover:bg-slate-50"
-              )}
-            >
-              Mois
-            </button>
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Agenda</h1>
+          <p className="text-sm text-slate-500 mt-0.5 capitalize">{getTitle()}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Vue Jour / Semaine / Mois */}
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden bg-white shadow-sm">
+            {(['day', 'week', 'month'] as ViewMode[]).map((mode, i) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={clsx(
+                  'px-3 py-1.5 text-sm font-medium transition-colors',
+                  i > 0 && 'border-l border-slate-200',
+                  viewMode === mode
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-600 hover:bg-slate-50',
+                )}
+              >
+                {mode === 'day' ? 'Jour' : mode === 'week' ? 'Semaine' : 'Mois'}
+              </button>
+            ))}
           </div>
           <button
-            onClick={() => {
-              setSelectedAppointment(null);
-              setIsFormOpen(true);
-            }}
-            className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+            onClick={() => { setSelectedAppointment(null); setIsFormOpen(true); }}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium shadow-sm hover:bg-indigo-700 transition-colors"
           >
-            <Plus className="-ml-1 mr-2 h-5 w-5" />
-            Nouveau
+            <Plus className="w-4 h-4" />
+            Nouveau RDV
           </button>
         </div>
       </div>
+
+      {/* DateNavigator */}
+      <DateNavigator
+        selectedDate={selectedDate}
+        onDateChange={setSelectedDate}
+        counts={appointmentCounts}
+      />
 
       {queryError && (
         <div className="rounded-md bg-red-50 border border-red-200 p-4 flex items-start">
@@ -333,26 +340,6 @@ export default function Appointments() {
       )}
 
       <div className="bg-white shadow rounded-lg overflow-hidden flex flex-col">
-        {/* Navigation Toolbar */}
-        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <button onClick={handleToday} className="px-3 py-1.5 border border-slate-300 rounded-md bg-white text-sm font-medium text-slate-700 hover:bg-slate-50">
-              Aujourd'hui
-            </button>
-            <div className="flex items-center space-x-2">
-              <button onClick={handlePrev} className="p-1.5 rounded-full hover:bg-slate-200 text-slate-600">
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <button onClick={handleNext} className="p-1.5 rounded-full hover:bg-slate-200 text-slate-600">
-                <ChevronRight className="h-5 w-5" />
-              </button>
-            </div>
-          </div>
-          <div className="text-sm font-medium text-slate-900 capitalize">
-            {getTitle()}
-          </div>
-        </div>
-
         {/* Agenda List */}
         <div className="flex-1 p-0 overflow-y-auto max-h-[600px]">
           {viewMode === 'day' ? (
